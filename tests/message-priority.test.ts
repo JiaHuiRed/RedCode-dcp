@@ -814,6 +814,13 @@ test("hallucination stripping does not affect non-dcp tags", async () => {
     )
 })
 
+test("hallucination stripping removes trailing mXXXX</parameter> artifact (issue #555)", () => {
+    assert.equal(
+        stripHallucinationsFromString("Total: maybe 20 lines changed.\n\nm0340</parameter>\n\n"),
+        "Total: maybe 20 lines changed.\n\n",
+    )
+})
+
 test("injectMessageIds skips empty assistant messages to avoid prefill (issue #463)", () => {
     const sessionID = "ses_empty_assistant"
     const messages: WithParts[] = [

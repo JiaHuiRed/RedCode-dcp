@@ -655,7 +655,8 @@ function showConfigWarnings(
 
 const defaultConfig: PluginConfig = {
     enabled: true,
-    autoUpdate: true,
+    // 260808 Red fork：默认关闭自动更新（包名已私有化，双保险）
+    autoUpdate: false,
     debug: false,
     pruneNotification: "detailed",
     pruneNotificationType: "chat",

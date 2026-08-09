@@ -14,7 +14,9 @@ type UpdateResult =
     | { updated: false; error: "remove_failed"; name: string; current: string; latest: string }
     | { updated: false }
 
-const PACKAGE_NAME = "@tarquinen/opencode-dcp"
+// 260808 Red fork：包名改为私有名 @redcode/opencode-dcp（npm registry 无此包，
+// fetchLatestVersion 404 → 永不触发自动更新，防止 npm 新版覆盖 fork 改造）
+const PACKAGE_NAME = "@redcode/opencode-dcp"
 
 export function startAutoUpdate(ctx: PluginInput, enabled: boolean): void {
     if (!enabled) return

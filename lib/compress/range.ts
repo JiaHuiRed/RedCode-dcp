@@ -1,7 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 import type { ToolContext } from "./types"
 import { countTokens } from "../token-utils"
-import { RANGE_FORMAT_EXTENSION } from "../prompts/extensions/tool"
 import { finalizeSession, prepareSession, type NotificationEntry } from "./pipeline"
 import {
     appendProtectedPromptInfo,
@@ -26,7 +25,7 @@ import {
 } from "./state"
 import type { CompressRangeToolArgs } from "./types"
 
-function buildSchema() {
+function buildSchema(runtimePrompts: string) {
     return {
         topic: tool.schema
             .string()
@@ -42,9 +41,7 @@ function buildSchema() {
                     endId: tool.schema
                         .string()
                         .describe("Message or block ID marking the end of range (e.g. m0012, b5)"),
-                    summary: tool.schema
-                        .string()
-                        .describe("Complete technical summary replacing all content in range"),
+                    summary: tool.schema.string().describe(runtimePrompts),
                 }),
             )
             .describe(
@@ -53,13 +50,19 @@ function buildSchema() {
     }
 }
 
+// 260808 Red: description 保持精简，完整指令下沉到 summary 字段 describe，
+// 避免模型把长指令复述进正文（instruction-echo 剥离的泄漏源）
+const RANGE_DESCRIPTION =
+    "Collapse a range of conversation messages into a detailed summary. " +
+    "Provide startId/endId from the injected mNNNN or bN IDs; read the summary field instructions."
+
 export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof tool> {
     ctx.prompts.reload()
     const runtimePrompts = ctx.prompts.getRuntimePrompts()
 
     return tool({
-        description: runtimePrompts.compressRange + RANGE_FORMAT_EXTENSION,
-        args: buildSchema(),
+        description: RANGE_DESCRIPTION,
+        args: buildSchema(runtimePrompts.compressRange),
         async execute(args, toolCtx) {
             const input = args as CompressRangeToolArgs
             validateArgs(input)

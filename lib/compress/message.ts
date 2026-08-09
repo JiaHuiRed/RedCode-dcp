@@ -1,7 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 import type { ToolContext } from "./types"
 import { countTokens } from "../token-utils"
-import { MESSAGE_FORMAT_EXTENSION } from "../prompts/extensions/tool"
 import { formatIssues, formatResult, resolveMessages, validateArgs } from "./message-utils"
 import { finalizeSession, prepareSession, type NotificationEntry } from "./pipeline"
 import { appendProtectedPromptInfo, appendProtectedTools } from "./protected-content"
@@ -13,7 +12,7 @@ import {
 } from "./state"
 import type { CompressMessageToolArgs } from "./types"
 
-function buildSchema() {
+function buildSchema(runtimePrompts: string) {
     return {
         topic: tool.schema
             .string()
@@ -29,22 +28,25 @@ function buildSchema() {
                     topic: tool.schema
                         .string()
                         .describe("Short label (3-5 words) for this one message summary"),
-                    summary: tool.schema
-                        .string()
-                        .describe("Complete technical summary replacing that one message"),
+                    summary: tool.schema.string().describe(runtimePrompts),
                 }),
             )
             .describe("Batch of individual message summaries to create in one tool call"),
     }
 }
 
+// 260808 Red: description 保持精简，完整指令下沉到 summary 字段 describe
+const MESSAGE_DESCRIPTION =
+    "Collapse selected individual conversation messages into detailed summaries. " +
+    "Provide messageId from the injected mNNNN IDs; read the summary field instructions."
+
 export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof tool> {
     ctx.prompts.reload()
     const runtimePrompts = ctx.prompts.getRuntimePrompts()
 
     return tool({
-        description: runtimePrompts.compressMessage + MESSAGE_FORMAT_EXTENSION,
-        args: buildSchema(),
+        description: MESSAGE_DESCRIPTION,
+        args: buildSchema(runtimePrompts.compressMessage),
         async execute(args, toolCtx) {
             const input = args as CompressMessageToolArgs
             validateArgs(input)

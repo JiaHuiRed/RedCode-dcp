@@ -141,7 +141,7 @@ function buildMessages(sessionID: string): WithParts[] {
     ]
 }
 
-test("compress message tool appends non-editable format extension", () => {
+test("compress message tool keeps a concise description", () => {
     const tool = createCompressMessageTool({
         client: {},
         state: createSessionState(),
@@ -155,9 +155,11 @@ test("compress message tool appends non-editable format extension", () => {
         },
     } as any)
 
-    assert.match(tool.description, /THE FORMAT OF COMPRESS/)
-    assert.match(tool.description, /messageId: string/)
-    assert.match(tool.description, /Raw message ID only: mNNNN/)
+    // 260808 Red: description 精简（原长指令下沉到 summary 字段 describe，防模型复述泄漏）
+    assert.match(tool.description, /Collapse selected individual conversation messages/)
+    assert.match(tool.description, /read the summary field instructions/)
+    assert.doesNotMatch(tool.description, /THE FORMAT OF COMPRESS/)
+    assert.doesNotMatch(tool.description, /Raw message ID only: mNNNN/)
 })
 
 test("compress message mode batches individual message summaries", async () => {

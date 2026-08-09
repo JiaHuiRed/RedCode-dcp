@@ -97,10 +97,18 @@ export const injectCompressNudges = (
         const isLastMessageUser = lastMessage?.message.info.role === "user"
 
         if (isLastMessageUser && lastAssistantMessage) {
-            const previousSize = state.nudges.turnNudgeAnchors.size
-            state.nudges.turnNudgeAnchors.add(lastMessage.message.info.id)
-            state.nudges.turnNudgeAnchors.add(lastAssistantMessage.info.id)
-            if (state.nudges.turnNudgeAnchors.size !== previousSize) {
+            // 260808 Red: turn nudge 同样走 nudgeFrequency 间隔，防止每条 user 消息都触发
+            // 导致 nudge 高频注入 → 模型响应过度 → 微型压缩块
+            const interval = getNudgeFrequency(config)
+            const added = addAnchor(
+                state.nudges.turnNudgeAnchors,
+                lastMessage.message.info.id,
+                lastMessage.index,
+                messages,
+                interval,
+            )
+            if (added) {
+                state.nudges.turnNudgeAnchors.add(lastAssistantMessage.info.id)
                 anchorsChanged = true
             }
         }

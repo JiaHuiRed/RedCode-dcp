@@ -659,7 +659,9 @@ const defaultConfig: PluginConfig = {
     autoUpdate: false,
     debug: false,
     pruneNotification: "detailed",
-    pruneNotificationType: "chat",
+    // 260810 cc：默认走 toast，不再以 user 角色往会话里塞通知消息——那条伪 user 消息
+    // 是 260729 主仓 sourceFrom 退化的根因，任何"取最后一条 user 消息"的新逻辑都会踩。
+    pruneNotificationType: "toast",
     commands: {
         enabled: true,
         protectedTools: [...DEFAULT_PROTECTED_TOOLS],

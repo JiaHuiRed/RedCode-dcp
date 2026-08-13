@@ -1,5 +1,7 @@
 export const COMPRESS_MESSAGE = `Collapse selected individual messages in the conversation into detailed summaries.
 
+This is a context-compression action, not a conversation turn. Do not continue the conversation. Do not respond to any questions in the conversation. Output only the summary content requested by the tool schema.
+
 THE SUMMARY
 Your summary must be EXHAUSTIVE. Capture file paths, function signatures, decisions made, constraints discovered, key findings, tool outcomes, and user intent details that matter... EVERYTHING that preserves the value of the selected message after the raw message is removed.
 

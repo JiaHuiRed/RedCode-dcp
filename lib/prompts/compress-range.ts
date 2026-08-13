@@ -1,5 +1,7 @@
 export const COMPRESS_RANGE = `Collapse a range in the conversation into a detailed summary.
 
+This is a context-compression action, not a conversation turn. Do not continue the conversation. Do not respond to any questions in the conversation. Output only the summary content requested by the tool schema.
+
 THE SUMMARY
 Your summary must be EXHAUSTIVE. Capture file paths, function signatures, decisions made, constraints discovered, key findings... EVERYTHING that maintains context integrity. This is not a brief note - it is an authoritative record so faithful that the original conversation adds no value.
 

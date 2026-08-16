@@ -6,17 +6,18 @@ import { Logger } from "../lib/logger"
 import {
     createSessionState,
     loadManualModeSetting,
+    saveManualModeSetting,
     type WithParts,
 } from "../lib/state"
 
-function buildConfig(): PluginConfig {
+function buildConfig(manualMode = false): PluginConfig {
     return {
         enabled: true,
         debug: false,
         pruneNotification: "off",
         pruneNotificationType: "chat",
         commands: { enabled: true, protectedTools: [] },
-        manualMode: { enabled: false, automaticStrategies: true },
+        manualMode: { enabled: manualMode, automaticStrategies: true },
         turnProtection: { enabled: false, turns: 4 },
         experimental: { allowSubAgents: false, customPrompts: false },
         protectedFilePatterns: [],
@@ -40,12 +41,12 @@ function buildConfig(): PluginConfig {
     } as PluginConfig
 }
 
-function buildToolContext(state: ReturnType<typeof createSessionState>) {
+function buildToolContext(state: ReturnType<typeof createSessionState>, manualMode = false) {
     return {
         client: { session: { get: async () => ({}) } },
         state,
         logger: new Logger(false),
-        config: buildConfig(),
+        config: buildConfig(manualMode),
         prompts: {
             reload() {},
             getRuntimePrompts() {
@@ -75,14 +76,37 @@ test("finalizeSession resets compress-pending to auto mode", async () => {
     assert.equal(persisted, false)
 })
 
-test("finalizeSession preserves explicit active manual mode", async () => {
-    const sessionId = `finalize-active-manual-${Date.now()}`
+test("finalizeSession restores persisted manual mode after compression", async () => {
+    const sessionId = `finalize-persisted-manual-${Date.now()}`
+    const logger = new Logger(false)
+    await saveManualModeSetting(sessionId, true, logger)
+
     const state = createSessionState()
     state.sessionId = sessionId
-    state.manualMode = "active"
+    state.manualMode = "compress-pending"
 
     await finalizeSession(
         buildToolContext(state) as any,
+        { sessionID: sessionId, metadata: () => {}, ask: async () => {} },
+        [] as WithParts[],
+        [],
+        undefined,
+    )
+
+    assert.equal(state.manualMode, "active")
+
+    const persisted = await loadManualModeSetting(sessionId, logger)
+    assert.equal(persisted, true)
+})
+
+test("finalizeSession restores configured manual mode after compression", async () => {
+    const sessionId = `finalize-configured-manual-${Date.now()}`
+    const state = createSessionState()
+    state.sessionId = sessionId
+    state.manualMode = "compress-pending"
+
+    await finalizeSession(
+        buildToolContext(state, true) as any,
         { sessionID: sessionId, metadata: () => {}, ask: async () => {} },
         [] as WithParts[],
         [],

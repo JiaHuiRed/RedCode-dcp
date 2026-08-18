@@ -14,7 +14,10 @@ export function getCurrentTokenUsage(state: SessionState, messages: WithParts[])
         }
 
         const assistantInfo = msg.info as AssistantMessage
-        if ((assistantInfo.tokens?.output || 0) <= 0) {
+        // 260818 Red: 纯 reasoning 轮（output=0 但 reasoning>0，deepseek-v4 系列典型）
+        // 必须参与用量估算——只看 output 会把这类轮次跳过、回退到更早消息，
+        // 低估当前上下文、延迟压缩触发（压缩后首条纯思考轮甚至误报 0）。
+        if ((assistantInfo.tokens?.output || 0) + (assistantInfo.tokens?.reasoning || 0) <= 0) {
             continue
         }
 

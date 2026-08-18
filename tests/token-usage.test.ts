@@ -210,6 +210,40 @@ test("getCurrentTokenUsage returns 0 until a fresh assistant follows compaction"
     assert.equal(getCurrentTokenUsage(state, messages), 0)
 })
 
+test("getCurrentTokenUsage counts reasoning-only assistant turns instead of skipping them", () => {
+    const sessionID = "ses_reasoning_only"
+    const messages: WithParts[] = [
+        {
+            info: {
+                id: "msg-assistant-reasoning-only",
+                role: "assistant",
+                sessionID,
+                agent: "assistant",
+                time: { created: 10 },
+                tokens: {
+                    input: 30000,
+                    output: 0,
+                    reasoning: 8000,
+                    cache: { read: 2000, write: 0 },
+                },
+            } as WithParts["info"],
+            parts: [
+                textPart(
+                    "msg-assistant-reasoning-only",
+                    sessionID,
+                    "msg-assistant-reasoning-only-part",
+                    "",
+                ),
+            ],
+        },
+    ]
+    const state = createSessionState()
+
+    // 纯 reasoning 轮（output=0, reasoning>0）必须参与用量估算，
+    // 不能被跳过回退到更早消息——否则低估上下文、延迟压缩触发。
+    assert.equal(getCurrentTokenUsage(state, messages), 30000 + 0 + 8000 + 2000)
+})
+
 test("isContextOverLimits ignores stale summary totals and resumes with fresh reported totals", () => {
     const messages = buildCompactedMessages()
     const state = createSessionState()

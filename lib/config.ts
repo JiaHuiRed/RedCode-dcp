@@ -608,6 +608,47 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
     return errors
 }
 
+// 260819 cc min/max 上下文触发线倒置检测。
+// 为什么必须报出来：isContextOverLimits 里 overMin = tokens >= min、overMax = tokens > max，
+// 而 injectCompressNudges 的结构是 if (overMaxLimit) {...} else if (overMinLimit) {...}。
+// 一旦 min >= max，overMin 为真时 overMax 必为真（summaryBuffer 增量远小于两者之差），
+// else-if 分支永不可达 —— turn nudge 与 iteration nudge 这两档「渐进提醒」整个失效，
+// 模型从「毫无提示」直接跳到 max 线上的强制压缩，没有从容选块的机会，压缩降幅因此偏小。
+// 这类错配不报错也不回落，只是静默少掉一整档行为，靠肉眼比对两张表很难发现。
+function validateContextLimits(configData: Record<string, any>): string[] {
+    const compress = configData?.compress
+    if (!compress || typeof compress !== "object") return []
+
+    const messages: string[] = []
+    // 百分比写法与数字无法直接比较（百分比要按模型上下文换算，那发生在 resolveContextTokenLimit），
+    // 这里只校验两侧都是数字的情形，宁可漏报不误报。
+    const asNumber = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined)
+
+    const globalMin = asNumber(compress.minContextLimit)
+    const globalMax = asNumber(compress.maxContextLimit)
+    if (globalMin !== undefined && globalMax !== undefined && globalMin >= globalMax) {
+        messages.push(`minContextLimit(${globalMin}) >= maxContextLimit(${globalMax}) — 渐进提醒档失效`)
+    }
+
+    const mins = compress.modelMinLimits
+    const maxs = compress.modelMaxLimits
+    if (mins && typeof mins === "object" && maxs && typeof maxs === "object") {
+        const inverted: string[] = []
+        for (const key of Object.keys(mins)) {
+            const mn = asNumber(mins[key])
+            const mx = asNumber(maxs[key])
+            if (mn !== undefined && mx !== undefined && mn >= mx) inverted.push(key)
+        }
+        if (inverted.length > 0) {
+            const head = inverted.slice(0, 2).join(", ")
+            const suffix = inverted.length > 2 ? ` (+${inverted.length - 2} more)` : ""
+            messages.push(`modelMinLimits >= modelMaxLimits: ${head}${suffix} — 渐进提醒档失效`)
+        }
+    }
+
+    return messages
+}
+
 function showConfigWarnings(
     ctx: PluginInput,
     configPath: string,
@@ -616,8 +657,9 @@ function showConfigWarnings(
 ): void {
     const invalidKeys = getInvalidConfigKeys(configData)
     const typeErrors = validateConfigTypes(configData)
+    const limitErrors = validateContextLimits(configData)
 
-    if (invalidKeys.length === 0 && typeErrors.length === 0) {
+    if (invalidKeys.length === 0 && typeErrors.length === 0 && limitErrors.length === 0) {
         return
     }
 
@@ -637,6 +679,10 @@ function showConfigWarnings(
         if (typeErrors.length > 2) {
             messages.push(`(+${typeErrors.length - 2} more type errors)`)
         }
+    }
+
+    for (const err of limitErrors) {
+        messages.push(err)
     }
 
     setTimeout(() => {

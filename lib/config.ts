@@ -783,7 +783,7 @@ const defaultConfig: PluginConfig = {
         nudgeFrequency: 5,
         iterationNudgeThreshold: 15,
         nudgeForce: "soft",
-        absoluteNudgeThreshold: 20000,
+        absoluteNudgeThreshold: 15000,
         absoluteNudgeFrequency: 15,
         protectedTools: [...COMPRESS_DEFAULT_PROTECTED_TOOLS],
         protectTags: false,

@@ -81,10 +81,10 @@ test("absolute nudge anchors when tokens pass threshold and below min limit", ()
     const sessionID = "ses_absolute_nudge_trigger"
     const messages: WithParts[] = [
         buildMessage("msg-user-1", "user", sessionID),
-        buildMessage("msg-assistant-1", "assistant", sessionID, 25000),
+        buildMessage("msg-assistant-1", "assistant", sessionID, 16000),
     ]
     const state = createSessionState()
-    const config = buildConfig({ absoluteNudgeThreshold: 20000, absoluteNudgeFrequency: 5 })
+    const config = buildConfig({ absoluteNudgeThreshold: 15000, absoluteNudgeFrequency: 5 })
     const logger = new Logger(false)
 
     injectCompressNudges(state, config, logger, messages, prompts)

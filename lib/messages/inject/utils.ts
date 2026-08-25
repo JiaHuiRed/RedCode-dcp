@@ -38,6 +38,10 @@ export function getNudgeFrequency(config: PluginConfig): number {
     return Math.max(1, Math.floor(config.compress.nudgeFrequency || 1))
 }
 
+export function getAbsoluteNudgeFrequency(config: PluginConfig): number {
+    return Math.max(1, Math.floor(config.compress.absoluteNudgeFrequency || 1))
+}
+
 export function getIterationNudgeThreshold(config: PluginConfig): number {
     return Math.max(1, Math.floor(config.compress.iterationNudgeThreshold || 1))
 }
@@ -293,6 +297,9 @@ function applyRangeModeAnchoredNudge(
     baseNudgeText: string,
     compressedBlockGuidance: string,
 ): void {
+    if (!baseNudgeText) {
+        return
+    }
     const nudgeText = appendGuidanceToDcpTag(baseNudgeText, compressedBlockGuidance)
     if (!nudgeText.trim()) {
         return
@@ -309,6 +316,9 @@ function applyMessageModeAnchoredNudge(
     baseNudgeText: string,
     compressionPriorities?: CompressionPriorityMap,
 ): void {
+    if (!baseNudgeText) {
+        return
+    }
     for (const { message, index } of collectAnchoredMessages(anchorMessageIds, messages)) {
         const priorityGuidance = buildMessagePriorityGuidance(
             messages,
@@ -349,6 +359,12 @@ export function applyAnchoredNudges(
             prompts.iterationNudge,
             compressionPriorities,
         )
+        applyMessageModeAnchoredNudge(
+            state.nudges.absoluteNudgeAnchors,
+            messages,
+            prompts.absoluteNudge,
+            compressionPriorities,
+        )
         return
     }
 
@@ -369,6 +385,12 @@ export function applyAnchoredNudges(
         state.nudges.iterationNudgeAnchors,
         messages,
         prompts.iterationNudge,
+        compressedBlockGuidance,
+    )
+    applyRangeModeAnchoredNudge(
+        state.nudges.absoluteNudgeAnchors,
+        messages,
+        prompts.absoluteNudge,
         compressedBlockGuidance,
     )
 }

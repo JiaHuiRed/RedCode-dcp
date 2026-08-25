@@ -8,6 +8,7 @@ import { COMPRESS_MESSAGE as COMPRESS_MESSAGE_PROMPT } from "./compress-message"
 import { CONTEXT_LIMIT_NUDGE } from "./context-limit-nudge"
 import { TURN_NUDGE } from "./turn-nudge"
 import { ITERATION_NUDGE } from "./iteration-nudge"
+import { ABSOLUTE_NUDGE } from "./absolute-nudge"
 import { MANUAL_MODE_SYSTEM_EXTENSION, SUBAGENT_SYSTEM_EXTENSION } from "./extensions/system"
 
 export type PromptKey =
@@ -17,6 +18,7 @@ export type PromptKey =
     | "context-limit-nudge"
     | "turn-nudge"
     | "iteration-nudge"
+    | "absolute-nudge"
 
 type EditablePromptField =
     | "system"
@@ -25,6 +27,7 @@ type EditablePromptField =
     | "contextLimitNudge"
     | "turnNudge"
     | "iterationNudge"
+    | "absoluteNudge"
 
 interface PromptDefinition {
     key: PromptKey
@@ -53,6 +56,7 @@ export interface RuntimePrompts {
     contextLimitNudge: string
     turnNudge: string
     iterationNudge: string
+    absoluteNudge: string
     manualExtension: string
     subagentExtension: string
 }
@@ -106,6 +110,14 @@ const PROMPT_DEFINITIONS: PromptDefinition[] = [
         usage: "Injected when iteration threshold is crossed",
         runtimeField: "iterationNudge",
     },
+    {
+        key: "absolute-nudge",
+        fileName: "absolute-nudge.md",
+        label: "Absolute Nudge",
+        description: "Lightweight nudge when context is large in absolute terms",
+        usage: "Injected periodically once input tokens pass the absolute threshold",
+        runtimeField: "absoluteNudge",
+    },
 ]
 
 export const PROMPT_KEYS: PromptKey[] = [
@@ -115,6 +127,7 @@ export const PROMPT_KEYS: PromptKey[] = [
     "context-limit-nudge",
     "turn-nudge",
     "iteration-nudge",
+    "absolute-nudge",
 ]
 
 const HTML_COMMENT_REGEX = /<!--[\s\S]*?-->/g
@@ -130,6 +143,7 @@ const BUNDLED_EDITABLE_PROMPTS: Record<EditablePromptField, string> = {
     contextLimitNudge: CONTEXT_LIMIT_NUDGE,
     turnNudge: TURN_NUDGE,
     iterationNudge: ITERATION_NUDGE,
+    absoluteNudge: ABSOLUTE_NUDGE,
 }
 
 const INTERNAL_PROMPT_EXTENSIONS = {
@@ -145,6 +159,7 @@ function createBundledRuntimePrompts(): RuntimePrompts {
         contextLimitNudge: BUNDLED_EDITABLE_PROMPTS.contextLimitNudge,
         turnNudge: BUNDLED_EDITABLE_PROMPTS.turnNudge,
         iterationNudge: BUNDLED_EDITABLE_PROMPTS.iterationNudge,
+        absoluteNudge: BUNDLED_EDITABLE_PROMPTS.absoluteNudge,
         manualExtension: INTERNAL_PROMPT_EXTENSIONS.manualExtension,
         subagentExtension: INTERNAL_PROMPT_EXTENSIONS.subagentExtension,
     }

@@ -647,6 +647,7 @@ test("range-mode nudges skip assistant messages with only empty text parts (issu
         contextLimitNudge: "",
         turnNudge: "",
         iterationNudge: "",
+        absoluteNudge: "",
     })
 
     // Empty text parts should not receive nudge injection

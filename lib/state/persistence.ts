@@ -31,6 +31,7 @@ export interface PersistedNudges {
     contextLimitAnchors: string[]
     turnNudgeAnchors?: string[]
     iterationNudgeAnchors?: string[]
+    absoluteNudgeAnchors?: string[]
 }
 
 export interface PersistedSessionState {
@@ -98,6 +99,7 @@ export async function saveSessionState(
                 contextLimitAnchors: Array.from(sessionState.nudges.contextLimitAnchors),
                 turnNudgeAnchors: Array.from(sessionState.nudges.turnNudgeAnchors),
                 iterationNudgeAnchors: Array.from(sessionState.nudges.iterationNudgeAnchors),
+                absoluteNudgeAnchors: Array.from(sessionState.nudges.absoluteNudgeAnchors),
             },
             stats: sessionState.stats,
             lastUpdated: new Date().toISOString(),
@@ -191,6 +193,22 @@ export async function loadSessionState(
         }
         state.nudges.iterationNudgeAnchors = dedupedIterationAnchors
 
+        const rawAbsoluteNudgeAnchors = Array.isArray(state.nudges.absoluteNudgeAnchors)
+            ? state.nudges.absoluteNudgeAnchors
+            : []
+        const validAbsoluteAnchors = rawAbsoluteNudgeAnchors.filter(
+            (entry): entry is string => typeof entry === "string",
+        )
+        const dedupedAbsoluteAnchors = [...new Set(validAbsoluteAnchors)]
+        if (validAbsoluteAnchors.length !== rawAbsoluteNudgeAnchors.length) {
+            logger.warn("Filtered out malformed absoluteNudgeAnchors entries", {
+                sessionId: sessionId,
+                original: rawAbsoluteNudgeAnchors.length,
+                valid: validAbsoluteAnchors.length,
+            })
+        }
+        state.nudges.absoluteNudgeAnchors = dedupedAbsoluteAnchors
+
         logger.info("Loaded session state from disk", {
             sessionId: sessionId,
         })
@@ -223,6 +241,7 @@ function emptyPersistedState(manualMode: boolean): PersistedSessionState {
             contextLimitAnchors: [],
             turnNudgeAnchors: [],
             iterationNudgeAnchors: [],
+            absoluteNudgeAnchors: [],
         },
         stats: {
             pruneTokenCounter: 0,

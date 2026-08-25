@@ -24,6 +24,8 @@ export interface CompressConfig {
     nudgeFrequency: number
     iterationNudgeThreshold: number
     nudgeForce: "strong" | "soft"
+    absoluteNudgeThreshold: number
+    absoluteNudgeFrequency: number
     protectedTools: string[]
     protectTags: boolean
     protectUserMessages: boolean
@@ -123,6 +125,8 @@ export const VALID_CONFIG_KEYS = new Set([
     "compress.nudgeFrequency",
     "compress.iterationNudgeThreshold",
     "compress.nudgeForce",
+    "compress.absoluteNudgeThreshold",
+    "compress.absoluteNudgeFrequency",
     "compress.protectedTools",
     "compress.protectTags",
     "compress.protectUserMessages",
@@ -413,6 +417,50 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
                     key: "compress.nudgeForce",
                     expected: '"strong" | "soft"',
                     actual: JSON.stringify(compress.nudgeForce),
+                })
+            }
+
+            if (
+                compress.absoluteNudgeThreshold !== undefined &&
+                typeof compress.absoluteNudgeThreshold !== "number"
+            ) {
+                errors.push({
+                    key: "compress.absoluteNudgeThreshold",
+                    expected: "number",
+                    actual: typeof compress.absoluteNudgeThreshold,
+                })
+            }
+
+            if (
+                typeof compress.absoluteNudgeThreshold === "number" &&
+                compress.absoluteNudgeThreshold < 1000
+            ) {
+                errors.push({
+                    key: "compress.absoluteNudgeThreshold",
+                    expected: "number >= 1000 (will be clamped to 1000)",
+                    actual: `${compress.absoluteNudgeThreshold} (will be clamped to 1000)`,
+                })
+            }
+
+            if (
+                compress.absoluteNudgeFrequency !== undefined &&
+                typeof compress.absoluteNudgeFrequency !== "number"
+            ) {
+                errors.push({
+                    key: "compress.absoluteNudgeFrequency",
+                    expected: "number",
+                    actual: typeof compress.absoluteNudgeFrequency,
+                })
+            }
+
+            if (
+                typeof compress.absoluteNudgeFrequency === "number" &&
+                compress.absoluteNudgeFrequency < 1
+            ) {
+                errors.push({
+                    key: "compress.absoluteNudgeFrequency",
+                    expected: "positive number (>= 1)",
+                    actual: `${compress.absoluteNudgeFrequency} (will be clamped to 1)`,
                 })
             }
 
@@ -735,6 +783,8 @@ const defaultConfig: PluginConfig = {
         nudgeFrequency: 5,
         iterationNudgeThreshold: 15,
         nudgeForce: "soft",
+        absoluteNudgeThreshold: 20000,
+        absoluteNudgeFrequency: 15,
         protectedTools: [...COMPRESS_DEFAULT_PROTECTED_TOOLS],
         protectTags: false,
         protectUserMessages: false,
@@ -901,6 +951,8 @@ function mergeCompress(
         nudgeFrequency: override.nudgeFrequency ?? base.nudgeFrequency,
         iterationNudgeThreshold: override.iterationNudgeThreshold ?? base.iterationNudgeThreshold,
         nudgeForce: override.nudgeForce ?? base.nudgeForce,
+        absoluteNudgeThreshold: override.absoluteNudgeThreshold ?? base.absoluteNudgeThreshold,
+        absoluteNudgeFrequency: override.absoluteNudgeFrequency ?? base.absoluteNudgeFrequency,
         protectedTools: [...new Set([...base.protectedTools, ...(override.protectedTools ?? [])])],
         protectTags: override.protectTags ?? base.protectTags,
         protectUserMessages: override.protectUserMessages ?? base.protectUserMessages,

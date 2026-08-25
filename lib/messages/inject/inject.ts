@@ -24,11 +24,13 @@ import {
     applyAnchoredNudges,
     countMessagesAfterIndex,
     findLastNonIgnoredMessage,
+    getAbsoluteNudgeFrequency,
     getIterationNudgeThreshold,
     getNudgeFrequency,
     getModelInfo,
     isContextOverLimits,
 } from "./utils"
+import { getCurrentTokenUsage } from "../../token-utils"
 
 export const injectCompressNudges = (
     state: SessionState,
@@ -53,6 +55,7 @@ export const injectCompressNudges = (
         state.nudges.contextLimitAnchors.clear()
         state.nudges.turnNudgeAnchors.clear()
         state.nudges.iterationNudgeAnchors.clear()
+        state.nudges.absoluteNudgeAnchors.clear()
         void saveSessionState(state, logger)
         return
     }
@@ -94,6 +97,12 @@ export const injectCompressNudges = (
             }
         }
     } else if (overMinLimit) {
+        // 260825 Red: absolute nudge 让位于 min 档，清掉残留锚防双 nudge 并存
+        if (state.nudges.absoluteNudgeAnchors.size > 0) {
+            state.nudges.absoluteNudgeAnchors.clear()
+            anchorsChanged = true
+        }
+
         const isLastMessageUser = lastMessage?.message.info.role === "user"
 
         if (isLastMessageUser && lastAssistantMessage) {
@@ -140,6 +149,29 @@ export const injectCompressNudges = (
                     }
                 }
             }
+        }
+    }
+
+    // 260825 Red: 收益档 nudge——绝对输入量已大但未到 min 档时，按 absoluteNudgeFrequency
+    // 间隔周期性提醒。与 min/max 档独立；低于阈值时清残留锚。
+    if (!overMaxLimit && !overMinLimit) {
+        const currentTokens = getCurrentTokenUsage(state, messages)
+
+        if (currentTokens >= config.compress.absoluteNudgeThreshold && lastMessage) {
+            const interval = getAbsoluteNudgeFrequency(config)
+            const added = addAnchor(
+                state.nudges.absoluteNudgeAnchors,
+                lastMessage.message.info.id,
+                lastMessage.index,
+                messages,
+                interval,
+            )
+            if (added) {
+                anchorsChanged = true
+            }
+        } else if (state.nudges.absoluteNudgeAnchors.size > 0) {
+            state.nudges.absoluteNudgeAnchors.clear()
+            anchorsChanged = true
         }
     }
 

@@ -341,5 +341,6 @@ export function resetOnCompaction(state: SessionState): void {
         contextLimitAnchors: new Set<string>(),
         turnNudgeAnchors: new Set<string>(),
         iterationNudgeAnchors: new Set<string>(),
+        absoluteNudgeAnchors: new Set<string>(),
     }
 }

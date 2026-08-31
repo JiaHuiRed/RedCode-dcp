@@ -3,6 +3,7 @@ import type { ToolContext } from "./types"
 import { countTokens } from "../token-utils"
 import { formatIssues, formatResult, resolveMessages, validateArgs } from "./message-utils"
 import { finalizeSession, prepareSession, type NotificationEntry } from "./pipeline"
+import { formatCompressionOutcome } from "./outcome"
 import { appendProtectedPromptInfo, appendProtectedTools } from "./protected-content"
 import {
     allocateBlockId,
@@ -105,13 +106,15 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
             }
 
             const runId = allocateRunId(ctx.state)
+            let totalCompressedTokens = 0
+            let totalSummaryTokens = 0
 
             for (const { plan, summaryWithTools } of preparedPlans) {
                 const blockId = allocateBlockId(ctx.state)
                 const storedSummary = wrapCompressedSummary(blockId, summaryWithTools)
                 const summaryTokens = countTokens(storedSummary)
 
-                applyCompressionState(
+                const applied = applyCompressionState(
                     ctx.state,
                     {
                         topic: plan.entry.topic,
@@ -131,6 +134,9 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
                     [],
                 )
 
+                totalCompressedTokens += applied.compressedTokens
+                totalSummaryTokens += summaryTokens
+
                 notifications.push({
                     blockId,
                     runId,
@@ -141,7 +147,16 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
 
             await finalizeSession(ctx, toolCtx, rawMessages, notifications, input.topic)
 
-            return formatResult(plans.length, skippedIssues, skippedCount)
+            return [
+                formatResult(plans.length, skippedIssues, skippedCount),
+                formatCompressionOutcome(
+                    ctx.state,
+                    ctx.config,
+                    rawMessages,
+                    totalCompressedTokens,
+                    totalSummaryTokens,
+                ),
+            ].join(" ")
         },
     })
 }

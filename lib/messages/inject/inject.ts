@@ -12,6 +12,7 @@ import {
     messageHasCompress,
 } from "../query"
 import { saveSessionState } from "../../state/persistence"
+import { sumCompressSavings } from "../../state/utils"
 import {
     appendToTextPart,
     appendToLastTextPart,
@@ -51,17 +52,17 @@ export const injectCompressNudges = (
     const lastMessage = findLastNonIgnoredMessage(messages)
     const lastAssistantMessage = messages.findLast((message) => message.info.role === "assistant")
 
-    if (lastAssistantMessage && messageHasCompress(lastAssistantMessage)) {
-        state.nudges.contextLimitAnchors.clear()
-        state.nudges.turnNudgeAnchors.clear()
-        state.nudges.iterationNudgeAnchors.clear()
-        state.nudges.absoluteNudgeAnchors.clear()
-        void saveSessionState(state, logger)
-        return
-    }
-
     const { providerId, modelId } = getModelInfo(messages)
     let anchorsChanged = false
+
+    // 260831 cc: 刚压完这一轮，上报用量还是压缩生效前那次请求的数字（压缩要到下一次
+    // 请求的 transform 才落地），判定前先扣掉本次 compress 的净收益，否则一次成功的
+    // 大压缩会被误判成「还在线上」。
+    const justCompressed = Boolean(lastAssistantMessage && messageHasCompress(lastAssistantMessage))
+    const pendingSavings =
+        justCompressed && lastAssistantMessage
+            ? sumCompressSavings(state, lastAssistantMessage.info.id)
+            : 0
 
     const { overMaxLimit, overMinLimit } = isContextOverLimits(
         config,
@@ -69,7 +70,27 @@ export const injectCompressNudges = (
         providerId,
         modelId,
         messages,
+        pendingSavings,
     )
+
+    if (justCompressed) {
+        // 非紧急三档照旧清空：刚压过就别连环催。
+        state.nudges.turnNudgeAnchors.clear()
+        state.nudges.iterationNudgeAnchors.clear()
+        state.nudges.absoluteNudgeAnchors.clear()
+
+        // 260831 cc: 紧急档不再无条件清。此前只要最后一条助手消息里有一次 completed 的
+        // compress 就四档全清并 return——压掉 3K 也算数，那一轮之内再没有任何推力，
+        // 模型压完最近一小块就收工（哥哥 08-30 在家实测：250K 压完仍是 250K）。
+        state.nudges.contextLimitAnchors.clear()
+        if (!overMaxLimit) {
+            void saveSessionState(state, logger)
+            return
+        }
+        // 仍在 max 之上：锚点清掉是为了让下面的正常流程重新下在当前最后一条消息上——
+        // 沿用旧锚会把提醒埋在历史中间，越靠后模型越读得到。
+        anchorsChanged = true
+    }
 
     if (!overMinLimit) {
         const hadTurnAnchors = state.nudges.turnNudgeAnchors.size > 0

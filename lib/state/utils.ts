@@ -33,6 +33,21 @@ interface PersistedPruneMessagesState {
     nextRunId: number
 }
 
+// 260831 cc: 某一条 compress 助手消息带来的净收益（压掉的 - 摘要本身占的）。
+// 用途：压缩要到下一次请求的 transform 才落地，而 getCurrentTokenUsage 读的是最后一条
+// 助手消息上报的用量——刚压完那一轮必须减掉这个数，才是压缩后的真实上下文估算。
+export function sumCompressSavings(state: SessionState, compressMessageId: string): number {
+    let saved = 0
+    for (const blockId of state.prune.messages.activeBlockIds) {
+        const block = state.prune.messages.blocksById.get(blockId)
+        if (!block || block.compressMessageId !== compressMessageId) {
+            continue
+        }
+        saved += Math.max(0, block.compressedTokens - block.summaryTokens)
+    }
+    return saved
+}
+
 export function serializePruneMessagesState(
     messagesState: PruneMessagesState,
 ): PersistedPruneMessagesState {

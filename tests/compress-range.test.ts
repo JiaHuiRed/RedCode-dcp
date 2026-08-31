@@ -171,7 +171,7 @@ test("compress range rebuilds subagent message refs after session state was rese
         },
     )
 
-    assert.equal(result, "Compressed 2 messages into [Compressed conversation section].")
+    assert.ok(result.startsWith("Compressed 2 messages into [Compressed conversation section]."))
     assert.equal(state.sessionId, sessionID)
     assert.equal(state.isSubAgent, true)
     assert.equal(state.messageIds.byRef.get("m0001"), "msg-assistant-1")
@@ -321,7 +321,7 @@ test("compress range mode batches multiple ranges into one notification", async 
         },
     )
 
-    assert.equal(result, "Compressed 2 messages into [Compressed conversation section].")
+    assert.ok(result.startsWith("Compressed 2 messages into [Compressed conversation section]."))
     assert.equal(state.prune.messages.blocksById.size, 2)
     assert.equal(toastCalls.length, 1)
     assert.match(toastCalls[0] || "", /▣ DCP \| -[^,\n]+ removed, \+[^\s\n]+ summary/)

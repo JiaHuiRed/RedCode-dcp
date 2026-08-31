@@ -24,6 +24,7 @@ import {
     wrapCompressedSummary,
 } from "./state"
 import type { CompressRangeToolArgs } from "./types"
+import { formatCompressionOutcome } from "./outcome"
 
 function buildSchema(runtimePrompts: string) {
     return {
@@ -151,6 +152,8 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
             }
 
             const runId = allocateRunId(ctx.state)
+            let totalCompressedTokens = 0
+            let totalSummaryTokens = 0
 
             for (const preparedPlan of preparedPlans) {
                 const blockId = allocateBlockId(ctx.state)
@@ -178,6 +181,8 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                 )
 
                 totalCompressedMessages += applied.messageIds.length
+                totalCompressedTokens += applied.compressedTokens
+                totalSummaryTokens += summaryTokens
 
                 notifications.push({
                     blockId,
@@ -189,7 +194,16 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
 
             await finalizeSession(ctx, toolCtx, rawMessages, notifications, input.topic)
 
-            return `Compressed ${totalCompressedMessages} messages into ${COMPRESSED_BLOCK_HEADER}.`
+            return [
+                `Compressed ${totalCompressedMessages} messages into ${COMPRESSED_BLOCK_HEADER}.`,
+                formatCompressionOutcome(
+                    ctx.state,
+                    ctx.config,
+                    rawMessages,
+                    totalCompressedTokens,
+                    totalSummaryTokens,
+                ),
+            ].join(" ")
         },
     })
 }

@@ -230,12 +230,26 @@ function resolveContextTokenLimit(
     return parseLimitValue(globalLimit)
 }
 
+export function resolveContextLimits(
+    config: PluginConfig,
+    state: SessionState,
+    providerId: string | undefined,
+    modelId: string | undefined,
+): { min: number | undefined; max: number | undefined } {
+    return {
+        min: resolveContextTokenLimit(config, state, providerId, modelId, "min"),
+        max: resolveContextTokenLimit(config, state, providerId, modelId, "max"),
+    }
+}
+
 export function isContextOverLimits(
     config: PluginConfig,
     state: SessionState,
     providerId: string | undefined,
     modelId: string | undefined,
     messages: WithParts[],
+    // 260831 cc: 已发生但尚未反映在上报用量里的收益（刚跑完的那次 compress），判定前先扣掉。
+    pendingSavings: number = 0,
 ) {
     const summaryTokenExtension = config.compress.summaryBuffer
         ? getActiveSummaryTokenUsage(state)
@@ -252,7 +266,7 @@ export function isContextOverLimits(
             ? undefined
             : resolvedMaxContextLimit + summaryTokenExtension
     const minContextLimit = resolveContextTokenLimit(config, state, providerId, modelId, "min")
-    const currentTokens = getCurrentTokenUsage(state, messages)
+    const currentTokens = Math.max(0, getCurrentTokenUsage(state, messages) - pendingSavings)
 
     const overMaxLimit = maxContextLimit === undefined ? false : currentTokens > maxContextLimit
     const overMinLimit = minContextLimit === undefined ? true : currentTokens >= minContextLimit

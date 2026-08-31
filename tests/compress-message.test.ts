@@ -209,7 +209,7 @@ test("compress message mode batches individual message summaries", async () => {
         },
     )
 
-    assert.equal(result, "Compressed 2 messages into [Compressed conversation section].")
+    assert.ok(result.startsWith("Compressed 2 messages into [Compressed conversation section]."))
     assert.equal(state.prune.messages.blocksById.size, 2)
 
     const blocks = Array.from(state.prune.messages.blocksById.values()).sort(
@@ -630,7 +630,7 @@ test("compress message mode allows messages containing compress tool parts", asy
         },
     )
 
-    assert.equal(result, "Compressed 1 message into [Compressed conversation section].")
+    assert.ok(result.startsWith("Compressed 1 message into [Compressed conversation section]."))
     assert.equal(state.prune.messages.blocksById.size, 1)
     const block = Array.from(state.prune.messages.blocksById.values())[0]
     assert.equal(block?.startId, "m0004")

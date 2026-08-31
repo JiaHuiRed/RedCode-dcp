@@ -1,4 +1,5 @@
 import type { SessionState, WithParts } from "../../state"
+import type { Logger } from "../../logger"
 import type { PluginConfig } from "../../config"
 import {
     appendGuidanceToDcpTag,
@@ -86,6 +87,102 @@ export function getModelInfo(messages: WithParts[]): LastUserModelContext {
         providerId: userInfo.model.providerID,
         modelId: userInfo.model.modelID,
     }
+}
+
+// 260831 cc: 每模型触发线的查表键是 `${providerID}/${modelID}`，写错 provider 会静默回落到
+// 全局默认值——2026-08-11 实测这就是「新 DCP 却像旧行为」的成因，当时全程没有任何日志。
+// 只在用户确实配了每模型触发线却没命中时报，同一个键每进程报一次。
+const warnedModelLimitKeys = new Set<string>()
+
+export interface ModelLimitMiss {
+    key: string
+    // 只报「配了但没命中」的那一档；另一档没配就是本来就打算走全局值。
+    thresholds: Array<"max" | "min">
+    // 已配置的键里 modelID 相同、provider 不同的那些——写错 provider 时这就是直接答案。
+    sameModelKeys: string[]
+}
+
+export function detectModelLimitMiss(
+    config: PluginConfig,
+    providerId: string | undefined,
+    modelId: string | undefined,
+): ModelLimitMiss | undefined {
+    if (providerId === undefined || modelId === undefined) {
+        return undefined
+    }
+
+    const tables: Array<{
+        threshold: "max" | "min"
+        limits: Record<string, number | `${number}%`> | undefined
+    }> = [
+        { threshold: "max", limits: config.compress.modelMaxLimits },
+        { threshold: "min", limits: config.compress.modelMinLimits },
+    ]
+
+    const key = `${providerId}/${modelId}`
+    const thresholds: Array<"max" | "min"> = []
+    const sameModelKeys = new Set<string>()
+
+    for (const { threshold, limits } of tables) {
+        if (!limits) continue
+        const configuredKeys = Object.keys(limits)
+        if (configuredKeys.length === 0) continue
+        if (limits[key] !== undefined) continue
+
+        thresholds.push(threshold)
+        for (const configured of configuredKeys) {
+            if (configured.slice(configured.indexOf("/") + 1) === modelId) {
+                sameModelKeys.add(configured)
+            }
+        }
+    }
+
+    if (thresholds.length === 0) {
+        return undefined
+    }
+
+    if (warnedModelLimitKeys.has(key)) {
+        return undefined
+    }
+    warnedModelLimitKeys.add(key)
+
+    return { key, thresholds, sameModelKeys: [...sameModelKeys].sort() }
+}
+
+export async function reportModelLimitMiss(
+    client: any,
+    logger: Logger,
+    config: PluginConfig,
+    messages: WithParts[],
+): Promise<void> {
+    const { providerId, modelId } = getModelInfo(messages)
+    const miss = detectModelLimitMiss(config, providerId, modelId)
+    if (!miss) {
+        return
+    }
+
+    const tables = miss.thresholds.map((t) => (t === "max" ? "modelMaxLimits" : "modelMinLimits"))
+    const lines = [`${miss.key} 未配置 ${tables.join(" / ")}，已回落到全局触发线。`]
+    if (miss.sameModelKeys.length > 0) {
+        lines.push(`同名模型已配置的键：${miss.sameModelKeys.join(", ")}`)
+    }
+
+    logger.warn("Model context limit key missed", {
+        key: miss.key,
+        thresholds: miss.thresholds,
+        sameModelKeys: miss.sameModelKeys,
+    })
+
+    try {
+        await client.tui.showToast({
+            body: {
+                title: "DCP: 每模型触发线未命中",
+                message: lines.join("\n"),
+                variant: "warning",
+                duration: 8000,
+            },
+        })
+    } catch {}
 }
 
 function resolveContextTokenLimit(

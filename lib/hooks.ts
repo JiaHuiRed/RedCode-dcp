@@ -7,6 +7,7 @@ import {
     buildToolIdList,
     injectCompressNudges,
     injectExtendedSubAgentResults,
+    reportModelLimitMiss,
     injectMessageIds,
     prune,
     stripHallucinations,
@@ -146,6 +147,8 @@ export function createChatMessageTransformHandler(
         )
         const compressionPriorities = buildPriorityMap(config, state, output.messages)
         prompts.reload()
+        // 260831 cc: 触发线键未命中此前完全静默，见 inject/utils.ts 的 detectModelLimitMiss。
+        await reportModelLimitMiss(client, logger, config, output.messages)
         injectCompressNudges(
             state,
             config,

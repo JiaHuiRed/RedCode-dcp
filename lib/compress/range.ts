@@ -25,6 +25,7 @@ import {
 } from "./state"
 import type { CompressRangeToolArgs } from "./types"
 import { formatCompressionOutcome } from "./outcome"
+import { checkViability, formatViabilityRejection, type ViabilityFailure } from "./viability"
 
 function buildSchema(runtimePrompts: string) {
     return {
@@ -149,6 +150,29 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                     finalSummary: completedSummary.expandedSummary,
                     consumedBlockIds: completedSummary.consumedBlockIds,
                 })
+            }
+
+            // 260903 cc: 还不起本钱的压缩在落库前拦掉，理由见 viability.ts。
+            // 放在这里而不是 resolveRanges 里：要等摘要拼完（含协议内容/用户消息回填）
+            // 才知道真实的摘要体积，而"摘要比它替换的还大"正是实际发生过的那一种。
+            const viabilityFailures: ViabilityFailure[] = []
+            for (const preparedPlan of preparedPlans) {
+                const failure = checkViability(
+                    ctx.state,
+                    preparedPlan.entry.startId,
+                    preparedPlan.entry.endId,
+                    preparedPlan.selection,
+                    preparedPlan.finalSummary,
+                )
+                if (failure) {
+                    viabilityFailures.push(failure)
+                }
+            }
+            if (viabilityFailures.length > 0) {
+                // 拒绝即"已经没有值得压的了"：退出恢复态，否则提醒会一直逼它交差，
+                // 而它只能交出更小的垃圾块。用量再次越过 max 时紧急档自会重新武装。
+                ctx.state.nudges.recovering = false
+                return formatViabilityRejection(viabilityFailures)
             }
 
             const runId = allocateRunId(ctx.state)

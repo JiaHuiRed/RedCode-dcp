@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import type { ToolContext } from "./types"
 import { countTokens } from "../token-utils"
+import { checkViability, formatViabilityRejection, type ViabilityFailure } from "./viability"
 import { formatIssues, formatResult, resolveMessages, validateArgs } from "./message-utils"
 import { finalizeSession, prepareSession, type NotificationEntry } from "./pipeline"
 import { formatCompressionOutcome } from "./outcome"
@@ -103,6 +104,29 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
                     plan,
                     summaryWithTools,
                 })
+            }
+
+            // 260903 cc: 摘要比它替换的内容还大就别落库，理由见 viability.ts。
+            // message 模式一个 plan 就是一条消息，不套体积下限（那是 range 模式的判据）。
+            const viabilityFailures: ViabilityFailure[] = []
+            for (const { plan, summaryWithTools } of preparedPlans) {
+                const failure = checkViability(
+                    ctx.state,
+                    plan.entry.messageId,
+                    plan.entry.messageId,
+                    plan.selection,
+                    summaryWithTools,
+                    { enforceMinimum: false },
+                )
+                if (failure) {
+                    viabilityFailures.push(failure)
+                }
+            }
+            if (viabilityFailures.length > 0) {
+                // 拒绝即"已经没有值得压的了"：退出恢复态，否则提醒会一直逼它交差，
+                // 而它只能交出更小的垃圾块。用量再次越过 max 时紧急档自会重新武装。
+                ctx.state.nudges.recovering = false
+                return formatViabilityRejection(viabilityFailures)
             }
 
             const runId = allocateRunId(ctx.state)

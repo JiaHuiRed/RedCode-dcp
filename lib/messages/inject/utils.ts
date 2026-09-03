@@ -4,6 +4,8 @@ import type { PluginConfig } from "../../config"
 import {
     appendGuidanceToDcpTag,
     buildCompressedBlockGuidance,
+    buildRecoveryBudgetGuidance,
+    type RecoveryBudget,
     renderMessagePriorityGuidance,
 } from "../../prompts/extensions/nudge"
 import type { RuntimePrompts } from "../../prompts/store"
@@ -20,7 +22,7 @@ import {
     hasContent,
 } from "../utils"
 import { getLastUserMessage, isIgnoredUserMessage } from "../query"
-import { getCurrentTokenUsage } from "../../token-utils"
+import { countAllMessageTokens, getCurrentTokenUsage } from "../../token-utils"
 import { getActiveSummaryTokenUsage } from "../../state/utils"
 
 const MESSAGE_MODE_NUDGE_PRIORITY: MessagePriority = "high"
@@ -274,7 +276,27 @@ export function isContextOverLimits(
     return {
         overMaxLimit,
         overMinLimit,
+        currentTokens,
+        minContextLimit,
+        maxContextLimit,
     }
+}
+
+/**
+ * 紧急档恢复的目标线。
+ *
+ * 260903 cc: 触发用 max、收手也用 max，等于压到线上就停，两轮之后又过线。min 与 max
+ * 之间那段（本仓配置 150K vs 220K，差 70K）本来就是留出来的余量，恢复就该一次压到那儿。
+ * 没配 min 时退回 max（此时行为与改动前一致）。
+ */
+export function resolveRecoveryTarget(
+    config: PluginConfig,
+    state: SessionState,
+    providerId: string | undefined,
+    modelId: string | undefined,
+): number | undefined {
+    const { min, max } = resolveContextLimits(config, state, providerId, modelId)
+    return min ?? max
 }
 
 export function addAnchor(
@@ -407,6 +429,7 @@ function applyRangeModeAnchoredNudge(
     messages: WithParts[],
     baseNudgeText: string,
     compressedBlockGuidance: string,
+    budgetGuidance?: string,
 ): void {
     if (!baseNudgeText) {
         return
@@ -416,8 +439,25 @@ function applyRangeModeAnchoredNudge(
         return
     }
 
-    for (const { message } of collectAnchoredMessages(anchorMessageIds, messages)) {
-        injectAnchoredNudge(message, nudgeText)
+    // 260903 cc: 预算表**只挂最后一个锚**。
+    //
+    // 里面的当前用量每轮都在变，而锚是会累积的（每 nudgeFrequency 条加一个）。若每个锚
+    // 都带这段动态文本，最老那个锚往后的前缀每轮都要作废 —— 那就是在修缓存问题的同时
+    // 制造一个新的缓存问题。最后一个锚在上下文末尾，改它只作废尾巴。
+    // 按会话位置排，不是 Set 的插入顺序 ——「最后一个锚」指上下文里最靠后的那条。
+    const anchored = [...collectAnchoredMessages(anchorMessageIds, messages)].sort(
+        (left, right) => left.index - right.index,
+    )
+    const newest = anchored.at(-1)
+    for (const entry of anchored) {
+        const text =
+            entry === newest && budgetGuidance
+                ? appendGuidanceToDcpTag(
+                      baseNudgeText,
+                      `${budgetGuidance}\n\n${compressedBlockGuidance}`,
+                  )
+                : nudgeText
+        injectAnchoredNudge(entry.message, text)
     }
 }
 
@@ -426,20 +466,58 @@ function applyMessageModeAnchoredNudge(
     messages: WithParts[],
     baseNudgeText: string,
     compressionPriorities?: CompressionPriorityMap,
+    budgetGuidance?: string,
 ): void {
     if (!baseNudgeText) {
         return
     }
-    for (const { message, index } of collectAnchoredMessages(anchorMessageIds, messages)) {
+    // 预算表只挂最新的那个锚，理由见 applyRangeModeAnchoredNudge 里的注释。
+    const anchored = [...collectAnchoredMessages(anchorMessageIds, messages)].sort(
+        (left, right) => left.index - right.index,
+    )
+    const newest = anchored.at(-1)
+    for (const entry of anchored) {
         const priorityGuidance = buildMessagePriorityGuidance(
             messages,
             compressionPriorities,
-            index,
+            entry.index,
             MESSAGE_MODE_NUDGE_PRIORITY,
         )
-        const nudgeText = appendGuidanceToDcpTag(baseNudgeText, priorityGuidance)
-        injectAnchoredNudge(message, nudgeText)
+        const guidance =
+            entry === newest && budgetGuidance
+                ? `${budgetGuidance}\n\n${priorityGuidance}`
+                : priorityGuidance
+        const nudgeText = appendGuidanceToDcpTag(baseNudgeText, guidance)
+        injectAnchoredNudge(entry.message, nudgeText)
     }
+}
+
+/**
+ * 最老的未压缩历史清单，供恢复预算表使用。
+ *
+ * 260903 cc: 跳过已经在活跃块里的消息 —— 再压一遍不产生任何新收益，
+ * 口径与 applyCompressionState 的 compressedTokens 一致。
+ */
+export function collectUncompressedLedger(
+    state: SessionState,
+    messages: WithParts[],
+): RecoveryBudget["uncompressed"] {
+    const ledger: RecoveryBudget["uncompressed"] = []
+    for (const message of messages) {
+        if (isIgnoredUserMessage(message)) {
+            continue
+        }
+        const ref = state.messageIds.byRawId.get(message.info.id)
+        if (!ref) {
+            continue
+        }
+        const entry = state.prune.messages.byMessageId.get(message.info.id)
+        if (entry && entry.activeBlockIds.length > 0) {
+            continue
+        }
+        ledger.push({ ref, tokens: entry?.tokenCount ?? countAllMessageTokens(message) })
+    }
+    return ledger
 }
 
 export function applyAnchoredNudges(
@@ -448,8 +526,12 @@ export function applyAnchoredNudges(
     messages: WithParts[],
     prompts: RuntimePrompts,
     compressionPriorities?: CompressionPriorityMap,
+    recoveryBudget?: RecoveryBudget,
 ): void {
     const turnNudgeAnchors = collectTurnNudgeAnchors(state, config, messages)
+    // 260903 cc: 预算表只挂紧急档。收益档的设计是"只压已闭合的段"，给它一个"必须删 N"
+    //   的硬指标会把它变成第二个紧急档。
+    const budgetGuidance = recoveryBudget ? buildRecoveryBudgetGuidance(recoveryBudget) : ""
 
     if (config.compress.mode === "message") {
         applyMessageModeAnchoredNudge(
@@ -457,6 +539,7 @@ export function applyAnchoredNudges(
             messages,
             prompts.contextLimitNudge,
             compressionPriorities,
+            budgetGuidance,
         )
         applyMessageModeAnchoredNudge(
             turnNudgeAnchors,
@@ -485,6 +568,7 @@ export function applyAnchoredNudges(
         messages,
         prompts.contextLimitNudge,
         compressedBlockGuidance,
+        budgetGuidance,
     )
     applyRangeModeAnchoredNudge(
         turnNudgeAnchors,

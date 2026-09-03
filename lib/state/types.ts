@@ -85,6 +85,15 @@ export interface MessageIdState {
 }
 
 export interface Nudges {
+    /**
+     * 紧急档恢复中。
+     *
+     * 260903 cc: 触发线与停止线此前是同一条（都用 max），压到 max-1K 就收手，
+     * 再跑两轮又过线 → 一个会话压很多次，每次都是一个缓存重置点。实测 ses_ffe5f9fca1
+     * 一个会话压了 9 次，其中 2 次净增（最小的一次压 20 token、摘要 140 token）。
+     * 置位后一路压到 min 才松手 —— min 与 max 之间那段余量本来就是配置里留好的。
+     */
+    recovering: boolean
     contextLimitAnchors: Set<string>
     turnNudgeAnchors: Set<string>
     iterationNudgeAnchors: Set<string>

@@ -353,6 +353,7 @@ export function resetOnCompaction(state: SessionState): void {
         nextRef: 1,
     }
     state.nudges = {
+        recovering: false,
         contextLimitAnchors: new Set<string>(),
         turnNudgeAnchors: new Set<string>(),
         iterationNudgeAnchors: new Set<string>(),

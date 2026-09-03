@@ -28,6 +28,8 @@ export interface PersistedPrune {
 }
 
 export interface PersistedNudges {
+    /** 260903 cc: 紧急档恢复中，见 state/types.ts 的 Nudges.recovering。 */
+    recovering?: boolean
     contextLimitAnchors: string[]
     turnNudgeAnchors?: string[]
     iterationNudgeAnchors?: string[]
@@ -96,6 +98,7 @@ export async function saveSessionState(
                 messages: serializePruneMessagesState(sessionState.prune.messages),
             },
             nudges: {
+                recovering: sessionState.nudges.recovering,
                 contextLimitAnchors: Array.from(sessionState.nudges.contextLimitAnchors),
                 turnNudgeAnchors: Array.from(sessionState.nudges.turnNudgeAnchors),
                 iterationNudgeAnchors: Array.from(sessionState.nudges.iterationNudgeAnchors),
@@ -238,6 +241,7 @@ function emptyPersistedState(manualMode: boolean): PersistedSessionState {
             },
         },
         nudges: {
+            recovering: false,
             contextLimitAnchors: [],
             turnNudgeAnchors: [],
             iterationNudgeAnchors: [],

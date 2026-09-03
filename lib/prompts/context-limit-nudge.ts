@@ -9,9 +9,10 @@ If you are in the middle of a critical atomic operation, finish that atomic step
 
 SELECTION PROCESS
 Work forward from the OLDEST uncompressed history. The oldest messages are the ones still costing you context on every single request; the block you just finished is the smallest win available and compressing only that is not a recovery.
-Select a range that starts at the oldest uncompressed message and extends as far forward as is safely possible in one pass.
+A RECOVERY BUDGET section below gives you the exact deficit and the cumulative size of the oldest history by end point. Use it: take the listed startId, and take the endId whose cumulative size covers the budget. Do not choose a smaller range than the budget requires.
 Leave only the newest still-active working messages uncompressed. Being recently closed is not a reason to prefer a block - prefer the oldest.
-After the tool returns, read the reported context numbers. If it says you are still above the threshold, compress again immediately instead of reporting completion.
+This must be ONE pass. Every extra compression rewrites history and resets the prefix cache, so a range that stops short costs more than the one large range you should have picked.
+If the tool rejects your selection as unable to pay for itself, do not retry with a similar range - either select a substantially larger one or report that the remaining history is already compressed.
 
 SUMMARY REQUIREMENTS
 Your summary MUST cover all essential details from the selected messages so work can continue.

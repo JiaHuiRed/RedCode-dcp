@@ -75,6 +75,7 @@ export function createSessionState(): SessionState {
             messages: createPruneMessagesState(),
         },
         nudges: {
+            recovering: false,
             contextLimitAnchors: new Set<string>(),
             turnNudgeAnchors: new Set<string>(),
             iterationNudgeAnchors: new Set<string>(),
@@ -114,6 +115,7 @@ export function resetSessionState(state: SessionState): void {
         messages: createPruneMessagesState(),
     }
     state.nudges = {
+        recovering: false,
         contextLimitAnchors: new Set<string>(),
         turnNudgeAnchors: new Set<string>(),
         iterationNudgeAnchors: new Set<string>(),
@@ -175,6 +177,7 @@ export async function ensureSessionInitialized(
 
     state.prune.tools = loadPruneMap(persisted.prune.tools)
     state.prune.messages = loadPruneMessagesState(persisted.prune.messages)
+    state.nudges.recovering = persisted.nudges.recovering === true
     state.nudges.contextLimitAnchors = new Set<string>(persisted.nudges.contextLimitAnchors || [])
     state.nudges.turnNudgeAnchors = new Set<string>([
         ...state.nudges.turnNudgeAnchors,

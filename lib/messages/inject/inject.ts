@@ -30,6 +30,8 @@ import {
     getNudgeFrequency,
     getModelInfo,
     isContextOverLimits,
+    resolveRecoveryTarget,
+    collectUncompressedLedger,
 } from "./utils"
 import { getCurrentTokenUsage } from "../../token-utils"
 
@@ -64,7 +66,7 @@ export const injectCompressNudges = (
             ? sumCompressSavings(state, lastAssistantMessage.info.id)
             : 0
 
-    const { overMaxLimit, overMinLimit } = isContextOverLimits(
+    const { overMaxLimit, overMinLimit, currentTokens } = isContextOverLimits(
         config,
         state,
         providerId,
@@ -72,6 +74,23 @@ export const injectCompressNudges = (
         messages,
         pendingSavings,
     )
+
+    // 260903 cc: 紧急档一旦触发就进入「恢复中」，一路压到 min 才松手。
+    //
+    // 此前触发线与停止线同为 max：压到 max-1K 收手，再跑两轮又过线，于是一个会话反复压，
+    // 每次都是缓存重置点。实测 ses_ffe5f9fca1 压了 9 次，其中 2 次净增（最小一次压 20
+    // token、摘要 140 token）。min 与 max 之间那段是配置里留好的余量，恢复就该一次到位。
+    const recoveryTarget = resolveRecoveryTarget(config, state, providerId, modelId)
+    if (overMaxLimit) {
+        state.nudges.recovering = true
+    } else if (
+        state.nudges.recovering &&
+        (recoveryTarget === undefined || currentTokens <= recoveryTarget)
+    ) {
+        state.nudges.recovering = false
+        anchorsChanged = true
+    }
+    const emergencyActive = overMaxLimit || state.nudges.recovering
 
     if (justCompressed) {
         // 非紧急三档照旧清空：刚压过就别连环催。
@@ -83,11 +102,11 @@ export const injectCompressNudges = (
         // compress 就四档全清并 return——压掉 3K 也算数，那一轮之内再没有任何推力，
         // 模型压完最近一小块就收工（哥哥 08-30 在家实测：250K 压完仍是 250K）。
         state.nudges.contextLimitAnchors.clear()
-        if (!overMaxLimit) {
+        if (!emergencyActive) {
             void saveSessionState(state, logger)
             return
         }
-        // 仍在 max 之上：锚点清掉是为了让下面的正常流程重新下在当前最后一条消息上——
+        // 仍未回到目标线：锚点清掉是为了让下面的正常流程重新下在当前最后一条消息上——
         // 沿用旧锚会把提醒埋在历史中间，越靠后模型越读得到。
         anchorsChanged = true
     }
@@ -103,7 +122,7 @@ export const injectCompressNudges = (
         }
     }
 
-    if (overMaxLimit) {
+    if (emergencyActive) {
         if (lastMessage) {
             const interval = getNudgeFrequency(config)
             const added = addAnchor(
@@ -175,7 +194,7 @@ export const injectCompressNudges = (
 
     // 260825 Red: 收益档 nudge——绝对输入量已大但未到 min 档时，按 absoluteNudgeFrequency
     // 间隔周期性提醒。与 min/max 档独立；低于阈值时清残留锚。
-    if (!overMaxLimit && !overMinLimit) {
+    if (!emergencyActive && !overMinLimit) {
         const currentTokens = getCurrentTokenUsage(state, messages)
 
         if (currentTokens >= config.compress.absoluteNudgeThreshold && lastMessage) {
@@ -196,7 +215,18 @@ export const injectCompressNudges = (
         }
     }
 
-    applyAnchoredNudges(state, config, messages, prompts, compressionPriorities)
+    // 260903 cc: 恢复期间把预算表算出来交给紧急档提醒 —— 让模型在**选范围之前**
+    // 就知道还差多少、累计到哪个 ID 够。此前它只有不透明的 mNNNN，只能猜。
+    const recoveryBudget =
+        emergencyActive && recoveryTarget !== undefined && currentTokens > recoveryTarget
+            ? {
+                  currentTokens,
+                  target: recoveryTarget,
+                  uncompressed: collectUncompressedLedger(state, messages),
+              }
+            : undefined
+
+    applyAnchoredNudges(state, config, messages, prompts, compressionPriorities, recoveryBudget)
 
     if (anchorsChanged) {
         void saveSessionState(state, logger)

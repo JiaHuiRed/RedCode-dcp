@@ -38,8 +38,17 @@ export function formatCompressionOutcome(
 
     const { providerId, modelId } = getModelInfo(messages)
     const { min, max } = resolveContextLimits(config, state, providerId, modelId)
+    // 260903 cc: 恢复目标是 min 不是 max —— 压到 max 上就收手会贴着触发线，两轮后又过线。
+    // 与 inject.ts 的 resolveRecoveryTarget 必须同源，否则工具说"够了"而提醒还在催。
+    const target = min ?? max
 
-    if (max !== undefined && after > max) {
+    if (state.nudges.recovering && target !== undefined && after > target) {
+        parts.push(
+            `STILL ABOVE the ${fmt(target)} recovery target${max !== undefined && after > max ? ` (and the ${fmt(max)} emergency threshold)` : ""} - you must remove about ${fmt(after - target)} more.`,
+            "Select another range starting at the OLDEST uncompressed message and compress again now.",
+            "Do not report completion yet.",
+        )
+    } else if (max !== undefined && after > max) {
         parts.push(
             `STILL ABOVE the ${fmt(max)} emergency threshold - older uncompressed history remains.`,
             "Select another range starting at the OLDEST uncompressed message and compress again now.",

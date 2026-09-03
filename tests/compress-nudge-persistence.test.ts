@@ -173,3 +173,46 @@ test("an effective compress clears the emergency nudge", () => {
     const text = messages[1]!.parts.find((p: any) => p.type === "text") as any
     assert.ok(!text.text.includes("EMERGENCY CONTEXT REMINDER"))
 })
+
+// 260903 cc: 恢复目标从 max 改成 min 之后的三条。
+// 改动前触发线与停止线同为 max，压到 max 之下就收手，两轮后又过线 → 一个会话反复压。
+
+test("a compress landing between min and max keeps the emergency nudge", () => {
+    // 249.9K 起，本次净省 50K → 199.9K：低于 max(220K) 但高于 min(150K)。
+    // 改动前这里会判定"已脱离紧急档"并清掉提醒 —— 正是贴着触发线反复压的来源。
+    const messages = buildJustCompressedMessages(249_900)
+    const state = createSessionState()
+    state.nudges.recovering = true // 上一轮过 max 时置的位
+    seedBlock(state, 55_000, 5_000)
+
+    injectCompressNudges(state, buildConfig(), new Logger(false), messages, prompts)
+
+    assert.equal(state.nudges.recovering, true)
+    assert.equal(state.nudges.contextLimitAnchors.has(ASSISTANT_ID), true)
+    const text = messages[1]!.parts.find((p: any) => p.type === "text") as any
+    assert.ok(text.text.includes("EMERGENCY CONTEXT REMINDER"))
+})
+
+test("recovery ends once context reaches min", () => {
+    // 同样 249.9K 起，本次净省 100K → 149.9K，压过了 min。
+    const messages = buildJustCompressedMessages(249_900)
+    const state = createSessionState()
+    state.nudges.recovering = true
+    seedBlock(state, 105_000, 5_000)
+
+    injectCompressNudges(state, buildConfig(), new Logger(false), messages, prompts)
+
+    assert.equal(state.nudges.recovering, false)
+    assert.equal(state.nudges.contextLimitAnchors.size, 0)
+    const text = messages[1]!.parts.find((p: any) => p.type === "text") as any
+    assert.ok(!text.text.includes("EMERGENCY CONTEXT REMINDER"))
+})
+
+test("crossing max arms recovery even before any compression", () => {
+    const messages = buildJustCompressedMessages(230_000)
+    const state = createSessionState()
+    // 没有 block，pendingSavings = 0；230K > max(220K)
+    injectCompressNudges(state, buildConfig(), new Logger(false), messages, prompts)
+
+    assert.equal(state.nudges.recovering, true)
+})

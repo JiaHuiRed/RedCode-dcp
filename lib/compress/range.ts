@@ -25,7 +25,15 @@ import {
 } from "./state"
 import type { CompressRangeToolArgs } from "./types"
 import { formatCompressionOutcome } from "./outcome"
-import { checkViability, formatViabilityRejection, type ViabilityFailure } from "./viability"
+import {
+    checkRecoveryBudget,
+    checkViability,
+    estimateNewlyCompressedTokens,
+    formatViabilityRejection,
+    type ViabilityFailure,
+} from "./viability"
+import { getModelInfo, resolveRecoveryTarget } from "../messages/inject/utils"
+import { getCurrentTokenUsage } from "../token-utils"
 
 function buildSchema(runtimePrompts: string) {
     return {
@@ -156,22 +164,70 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
             // 放在这里而不是 resolveRanges 里：要等摘要拼完（含协议内容/用户消息回填）
             // 才知道真实的摘要体积，而"摘要比它替换的还大"正是实际发生过的那一种。
             const viabilityFailures: ViabilityFailure[] = []
-            for (const preparedPlan of preparedPlans) {
+            const firstBlockId = ctx.state.prune.messages.nextBlockId
+            const storedSummaryTokens = preparedPlans.map((preparedPlan, index) =>
+                countTokens(
+                    wrapCompressedSummary(
+                        Number.isInteger(firstBlockId) && firstBlockId > 0
+                            ? firstBlockId + index
+                            : index + 1,
+                        preparedPlan.finalSummary,
+                    ),
+                ),
+            )
+            for (const [index, preparedPlan] of preparedPlans.entries()) {
                 const failure = checkViability(
                     ctx.state,
                     preparedPlan.entry.startId,
                     preparedPlan.entry.endId,
                     preparedPlan.selection,
                     preparedPlan.finalSummary,
+                    { summaryTokens: storedSummaryTokens[index]! },
                 )
                 if (failure) {
                     viabilityFailures.push(failure)
                 }
             }
+            if (viabilityFailures.length === 0 && preparedPlans.length > 0) {
+                const { providerId, modelId } = getModelInfo(rawMessages)
+                const recoveryTarget = resolveRecoveryTarget(
+                    ctx.config,
+                    ctx.state,
+                    providerId,
+                    modelId,
+                )
+                const requiredNetSavings =
+                    ctx.state.nudges.recovering && recoveryTarget !== undefined
+                        ? Math.max(0, getCurrentTokenUsage(ctx.state, rawMessages) - recoveryTarget)
+                        : 0
+                const selectionTokens = preparedPlans.reduce(
+                    (total, plan) =>
+                        total + estimateNewlyCompressedTokens(ctx.state, plan.selection),
+                    0,
+                )
+                const summaryTokens = storedSummaryTokens.reduce(
+                    (total, tokens) => total + tokens,
+                    0,
+                )
+                const firstPlan = preparedPlans[0]
+                const lastPlan = preparedPlans.at(-1)
+                if (firstPlan && lastPlan) {
+                    const failure = checkRecoveryBudget(
+                        ctx.state,
+                        firstPlan.entry.startId,
+                        lastPlan.entry.endId,
+                        selectionTokens,
+                        summaryTokens,
+                        requiredNetSavings,
+                    )
+                    if (failure) {
+                        viabilityFailures.push(failure)
+                    }
+                }
+            }
             if (viabilityFailures.length > 0) {
-                // 拒绝即"已经没有值得压的了"：退出恢复态，否则提醒会一直逼它交差，
-                // 而它只能交出更小的垃圾块。用量再次越过 max 时紧急档自会重新武装。
-                ctx.state.nudges.recovering = false
+                // 260908 Red: 预算不足时不写入任何块，也不解除恢复态。模型会在同一轮拿到
+                // 精确缺口，改选更大的范围；日常非恢复压缩不会进入这条门槛。
                 return formatViabilityRejection(viabilityFailures)
             }
 

@@ -12,18 +12,19 @@ function ledger(count: number, tokensEach: number) {
     }))
 }
 
-test("marks the smallest range that covers the deficit", () => {
-    // 缺口 100K，每条 10K：累计到第 10 条正好够
+test("marks the smallest range with summary headroom", () => {
+    // 净缺口 100K，预留 10% 摘要空间后需约 111.2K：每条 10K，累计到第 12 条。
     const text = buildRecoveryBudgetGuidance({
         currentTokens: 250_000,
         target: 150_000,
         uncompressed: ledger(30, 10_000),
     })
 
-    assert.ok(text.includes("must remove at least ~100.0K"))
+    assert.ok(text.includes("must net at least ~100.0K"))
+    assert.ok(text.includes("select about ~111.1K"))
     const marked = text.split("\n").filter((line) => line.includes("<- smallest range"))
     assert.equal(marked.length, 1)
-    assert.ok(marked[0]!.includes("m0001..m0010"), marked[0])
+    assert.ok(marked[0]!.includes("m0001..m0012"), marked[0])
     assert.ok(text.includes("Use m0001 as startId"))
 })
 
@@ -136,7 +137,11 @@ const budgetPrompts: RuntimePrompts = {
 test("the budget rides only on the newest anchor", () => {
     // 锚是累积的；预算表里的当前用量每轮在变。挂在老锚上会让它往后的前缀每轮作废，
     // 那就是在修缓存问题的同时制造一个新的缓存问题。
-    const messages = [message("m-1", "user"), message("m-2", "assistant"), message("m-3", "assistant")]
+    const messages = [
+        message("m-1", "user"),
+        message("m-2", "assistant"),
+        message("m-3", "assistant"),
+    ]
     const state = createSessionState()
     state.nudges.recovering = true
     state.nudges.contextLimitAnchors.add("m-1")
@@ -149,7 +154,10 @@ test("the budget rides only on the newest anchor", () => {
     })
 
     const textOf = (m: WithParts) =>
-        m.parts.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n")
+        m.parts
+            .filter((p: any) => p.type === "text")
+            .map((p: any) => p.text)
+            .join("\n")
 
     assert.ok(textOf(messages[0]!).includes("EMERGENCY"))
     assert.ok(!textOf(messages[0]!).includes("RECOVERY BUDGET"), "老锚不该带预算表")

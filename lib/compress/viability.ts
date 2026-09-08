@@ -30,7 +30,9 @@ export interface ViabilityFailure {
     endId: string
     selectionTokens: number
     summaryTokens: number
-    reason: "too-small" | "no-saving"
+    reason: "too-small" | "no-saving" | "insufficient-recovery"
+    requiredNetSavings?: number
+    actualNetSavings?: number
 }
 
 /**
@@ -66,14 +68,14 @@ export function checkViability(
     endId: string,
     selection: SelectionResolution,
     summary: string,
-    options?: { enforceMinimum?: boolean },
+    options?: { enforceMinimum?: boolean; summaryTokens?: number },
 ): ViabilityFailure | undefined {
     if (!state.nudges.recovering) {
         return undefined
     }
 
     const selectionTokens = estimateNewlyCompressedTokens(state, selection)
-    const summaryTokens = countTokens(summary)
+    const summaryTokens = options?.summaryTokens ?? countTokens(summary)
 
     if (options?.enforceMinimum !== false && selectionTokens < MIN_SELECTION_TOKENS) {
         return { startId, endId, selectionTokens, summaryTokens, reason: "too-small" }
@@ -84,6 +86,40 @@ export function checkViability(
     }
 
     return undefined
+}
+
+/**
+ * 紧急恢复不是“有一点收益就算完成”：一次成功的 range 必须真的够回到目标线。
+ *
+ * 日常收益档仍可按小任务压缩；这里只有 `recovering` 时才会检查总净收益。先在所有
+ * range 的摘要都补全后再验，既支持一次调用里的多个不重叠 range，也能按实际摘要成本算。
+ */
+export function checkRecoveryBudget(
+    state: SessionState,
+    startId: string,
+    endId: string,
+    selectionTokens: number,
+    summaryTokens: number,
+    requiredNetSavings: number,
+): ViabilityFailure | undefined {
+    if (!state.nudges.recovering || requiredNetSavings <= 0) {
+        return undefined
+    }
+
+    const actualNetSavings = selectionTokens - summaryTokens
+    if (actualNetSavings >= requiredNetSavings) {
+        return undefined
+    }
+
+    return {
+        startId,
+        endId,
+        selectionTokens,
+        summaryTokens,
+        reason: "insufficient-recovery",
+        requiredNetSavings,
+        actualNetSavings,
+    }
 }
 
 function fmt(n: number): string {
@@ -97,12 +133,15 @@ export function formatViabilityRejection(failures: ViabilityFailure[]): string {
         if (failure.reason === "too-small") {
             return `- ${where}: only ${fmt(failure.selectionTokens)} tokens of uncompressed history. Compressing it costs a full prefix-cache reset and saves almost nothing.`
         }
+        if (failure.reason === "insufficient-recovery") {
+            return `- ${where}: this batch would net ${fmt(failure.actualNetSavings ?? 0)}, but recovery needs ${fmt(failure.requiredNetSavings ?? 0)}. No block was written, so no prefix cache was reset.`
+        }
         return `- ${where}: your summary is ${fmt(failure.summaryTokens)} tokens but replaces only ${fmt(failure.selectionTokens)} - it would make context larger, not smaller.`
     })
 
     return [
-        "Compression rejected - the selected range(s) cannot pay for themselves:",
+        "Compression rejected - the selected range(s) cannot complete a worthwhile recovery:",
         ...lines,
-        "Select a substantially larger range starting at the OLDEST uncompressed message. If no such range is left, stop compressing and report that the remaining history is already compressed.",
+        "Select a substantially larger range starting at the OLDEST uncompressed message. In recovery, one successful call must cover the full remaining budget. If no such range is left, stop compressing and report that the remaining history is already compressed.",
     ].join("\n")
 }

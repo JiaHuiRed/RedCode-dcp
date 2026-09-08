@@ -62,6 +62,7 @@ function fmt(n: number): string {
 }
 
 const LEDGER_ROWS = 8
+const RECOVERY_SUMMARY_HEADROOM = 0.1
 
 /**
  * 紧急档恢复时把**预算和尺寸**给到模型。
@@ -80,6 +81,9 @@ export function buildRecoveryBudgetGuidance(budget: RecoveryBudget): string {
         return ""
     }
 
+    // 摘要也占上下文。按 10% 预留能让大多数摘要在第一次成功调用就真正回到目标线；
+    // 工具端仍按实际摘要 token 硬验，模型写得过长时不会静默放行。
+    const selectionTarget = Math.ceil(deficit / (1 - RECOVERY_SUMMARY_HEADROOM))
     const first = budget.uncompressed[0]!
     const rows: string[] = []
     let cumulative = 0
@@ -89,11 +93,12 @@ export function buildRecoveryBudgetGuidance(budget: RecoveryBudget): string {
     for (let index = 0; index < budget.uncompressed.length; index++) {
         const entry = budget.uncompressed[index]!
         cumulative += entry.tokens
-        const covers = !covered && cumulative >= deficit
+        const covers = !covered && cumulative >= selectionTarget
         if (covers) {
             covered = true
         }
-        const isCheckpoint = index % stride === stride - 1 || index === budget.uncompressed.length - 1
+        const isCheckpoint =
+            index % stride === stride - 1 || index === budget.uncompressed.length - 1
         if (!covers && !isCheckpoint) {
             continue
         }
@@ -104,10 +109,10 @@ export function buildRecoveryBudgetGuidance(budget: RecoveryBudget): string {
 
     return [
         "RECOVERY BUDGET",
-        `- Context is ${fmt(budget.currentTokens)}; the recovery target is ${fmt(budget.target)}. You must remove at least ${fmt(deficit)} of history in ONE pass.`,
+        `- Context is ${fmt(budget.currentTokens)}; the recovery target is ${fmt(budget.target)}. You must net at least ${fmt(deficit)} in ONE pass, so select about ${fmt(selectionTarget)} of raw history to leave 10% summary headroom.`,
         `- Cumulative size of the oldest uncompressed history, starting at ${first.ref}:`,
         ...rows,
-        `- Use ${first.ref} as startId. Pick the endId whose cumulative size covers the budget - stopping short means compressing again and paying another cache reset.`,
+        `- Use ${first.ref} as startId. Pick the endId whose cumulative size covers the marked target. A smaller recovery batch is rejected before it resets the prefix cache.`,
         "- These sizes exclude history already inside compressed blocks, so they are the real savings on offer.",
     ].join("\n")
 }

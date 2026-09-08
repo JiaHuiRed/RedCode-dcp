@@ -1,6 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { checkViability, estimateNewlyCompressedTokens } from "../lib/compress/viability"
+import {
+    checkRecoveryBudget,
+    checkViability,
+    estimateNewlyCompressedTokens,
+} from "../lib/compress/viability"
 import { createSessionState } from "../lib/state"
 import type { SessionState } from "../lib/state"
 import type { SelectionResolution } from "../lib/compress/types"
@@ -14,7 +18,11 @@ function buildSelection(tokensById: Record<string, number>): SelectionResolution
     const messageIds = Object.keys(tokensById)
     return {
         startReference: { kind: "message", rawIndex: 0, messageId: messageIds[0] },
-        endReference: { kind: "message", rawIndex: messageIds.length - 1, messageId: messageIds.at(-1) },
+        endReference: {
+            kind: "message",
+            rawIndex: messageIds.length - 1,
+            messageId: messageIds.at(-1),
+        },
         messageIds,
         messageTokenById: new Map(Object.entries(tokensById)),
         toolIds: [],
@@ -55,12 +63,28 @@ test("accepts a range that actually pays", () => {
     assert.equal(checkViability(state, "m0001", "m0040", selection, summaryOf(2_000)), undefined)
 })
 
+test("rejects a profitable range that cannot finish emergency recovery", () => {
+    const state = recoveringState()
+    const failure = checkRecoveryBudget(state, "m0001", "m0009", 40_000, 2_000, 100_000)
+
+    assert.ok(failure)
+    assert.equal(failure.reason, "insufficient-recovery")
+    assert.equal(failure.actualNetSavings, 38_000)
+    assert.equal(failure.requiredNetSavings, 100_000)
+})
+
+test("accepts a batch that reaches the recovery target after summary cost", () => {
+    const state = recoveringState()
+    assert.equal(checkRecoveryBudget(state, "m0001", "m0012", 120_000, 8_000, 100_000), undefined)
+})
+
 test("does not gate outside emergency recovery", () => {
     // 手动压一小段、收益档压单条消息都不该被拦——要拦的是被提醒逼着交差那一种
     const state = createSessionState()
     assert.equal(state.nudges.recovering, false)
     const selection = buildSelection({ m1: 20 })
     assert.equal(checkViability(state, "m0031", "m0031", selection, summaryOf(140)), undefined)
+    assert.equal(checkRecoveryBudget(state, "m0001", "m0001", 20, 1, 100_000), undefined)
 })
 
 test("already-compressed messages contribute no new saving", () => {

@@ -112,16 +112,21 @@ export function checkRecoveryBudget(
     // 一次压出物理上不存在的节省 —— 每一次提交都被拒、模型反复改写范围重试，上下文却
     // 永远降不下来（实测：缺口 313.7K，可压总量仅 142.5K，死循环）。这里把要求压到物理
     // 上限：压满全部可压内容即算达标。不传 availableTokens 时维持旧行为。
-    const required =
-        availableTokens === undefined
-            ? requiredNetSavings
-            : Math.min(requiredNetSavings, Math.max(0, availableTokens - summaryTokens))
+    const cap = availableTokens === undefined ? undefined : Math.max(0, availableTokens - summaryTokens)
+    const required = cap === undefined ? requiredNetSavings : Math.min(requiredNetSavings, cap)
     if (required <= 0) {
         return undefined
     }
 
+    // 260910 Red 封顶生效时（缺口 > 可压上限 = 这次就算压满也回不到目标线），达标线取的
+    // 是「可压总量 - 摘要」，而 selection 侧算的是它实际选中的那一批，两者集合并不完全
+    // 重合：ledger 会跳过 isIgnoredUserMessage / 无 ref 的条目，selection 的范围解析又可能
+    // 保不住最新一条；再加上 summaryTokens 本身是估算。实测 109.5K vs 109.6K，差 ~100
+    // token —— 物理上已尽力却永远不达标，死循环换个数字重演。封顶路径给 1% 容差（下限
+    // 200 token）吸收这点边界差；非封顶路径（真缺口）不宽容。
+    const slack = cap !== undefined && requiredNetSavings > cap ? Math.max(200, Math.round(required * 0.01)) : 0
     const actualNetSavings = selectionTokens - summaryTokens
-    if (actualNetSavings >= required) {
+    if (actualNetSavings + slack >= required) {
         return undefined
     }
 

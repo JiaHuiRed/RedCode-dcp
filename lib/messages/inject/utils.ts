@@ -515,7 +515,15 @@ export function collectUncompressedLedger(
         if (entry && entry.activeBlockIds.length > 0) {
             continue
         }
-        ledger.push({ ref, tokens: entry?.tokenCount ?? countAllMessageTokens(message) })
+        // 260910 Red 这里的 token 口径必须与 selection 侧完全同源。
+        //   selection 侧（estimateNewlyCompressedTokens → messageTokenById）用的是
+        //   countAllMessageTokens 的**当前**值；这里原先优先取 entry.tokenCount——
+        //   那是 applyCompressionState 写入的历史记录值，且 state.ts 用 Math.max
+        //   只增不减。同一条消息两者可以差出可观体积（实测整段虚高 8.8K）。
+        //   后果：13:31 那次"缺口大于可压总量时把达标线压到可压上限"的修复失效——
+        //   required 按虚高的 ledger 算、actualNetSavings 按实算，判据
+        //   selectionTokens >= availableTokens 永远差一截，每次提交都被拒。
+        ledger.push({ ref, tokens: countAllMessageTokens(message) })
     }
     return ledger
 }

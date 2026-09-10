@@ -119,14 +119,20 @@ export function checkRecoveryBudget(
     }
 
     // 260910 Red 封顶生效时（缺口 > 可压上限 = 这次就算压满也回不到目标线），达标线取的
-    // 是「可压总量 - 摘要」，而 selection 侧算的是它实际选中的那一批，两者集合并不完全
-    // 重合：ledger 会跳过 isIgnoredUserMessage / 无 ref 的条目，selection 的范围解析又可能
-    // 保不住最新一条；再加上 summaryTokens 本身是估算。实测 109.5K vs 109.6K，差 ~100
-    // token —— 物理上已尽力却永远不达标，死循环换个数字重演。封顶路径给 1% 容差（下限
-    // 200 token）吸收这点边界差；非封顶路径（真缺口）不宽容。
-    const slack = cap !== undefined && requiredNetSavings > cap ? Math.max(200, Math.round(required * 0.01)) : 0
+    // 是「可压账本 - 摘要」，而 selection 侧算的是它实际选中的那一批，两者集合本就不完全
+    // 重合：ledger 会跳过 isIgnoredUserMessage / 无 ref / 已在活跃块的条目，而任何 selection
+    // 都由 startId..endId 解析而来，边界消息（最新一条、被保护项）天然落不进选择集；摘要
+    // 本身又是估算。实测两轮：109.5K vs 109.6K（差 ~100 token）、120.3K vs 124.1K（差 3.8K）
+    // —— 差值随范围形状变化，固定容差治不了。封顶路径改用覆盖率判据：选择覆盖可压账本
+    // ≥ 95% 即视为「已压满」，放行；真缺口（requiredNetSavings <= cap）维持严格判据。
+    const capped = cap !== undefined && requiredNetSavings > cap
+    const coverage = !availableTokens ? 1 : selectionTokens / availableTokens
+    if (capped && coverage >= 0.95) {
+        return undefined
+    }
+
     const actualNetSavings = selectionTokens - summaryTokens
-    if (actualNetSavings + slack >= required) {
+    if (actualNetSavings >= required) {
         return undefined
     }
 

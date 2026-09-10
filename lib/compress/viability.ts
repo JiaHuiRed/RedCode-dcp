@@ -101,13 +101,27 @@ export function checkRecoveryBudget(
     selectionTokens: number,
     summaryTokens: number,
     requiredNetSavings: number,
+    availableTokens?: number,
 ): ViabilityFailure | undefined {
     if (!state.nudges.recovering || requiredNetSavings <= 0) {
         return undefined
     }
 
+    // 260910 Red 缺口可能大于可压缩总量：当前用量含系统提示词、工具 schema 与已压缩块等
+    // 不可压部分，而要求是「从当前用量降回目标线」。可压总量本身小于缺口时，旧逻辑要求
+    // 一次压出物理上不存在的节省 —— 每一次提交都被拒、模型反复改写范围重试，上下文却
+    // 永远降不下来（实测：缺口 313.7K，可压总量仅 142.5K，死循环）。这里把要求压到物理
+    // 上限：压满全部可压内容即算达标。不传 availableTokens 时维持旧行为。
+    const required =
+        availableTokens === undefined
+            ? requiredNetSavings
+            : Math.min(requiredNetSavings, Math.max(0, availableTokens - summaryTokens))
+    if (required <= 0) {
+        return undefined
+    }
+
     const actualNetSavings = selectionTokens - summaryTokens
-    if (actualNetSavings >= requiredNetSavings) {
+    if (actualNetSavings >= required) {
         return undefined
     }
 
@@ -117,7 +131,7 @@ export function checkRecoveryBudget(
         selectionTokens,
         summaryTokens,
         reason: "insufficient-recovery",
-        requiredNetSavings,
+        requiredNetSavings: required,
         actualNetSavings,
     }
 }

@@ -78,6 +78,35 @@ test("accepts a batch that reaches the recovery target after summary cost", () =
     assert.equal(checkRecoveryBudget(state, "m0001", "m0012", 120_000, 8_000, 100_000), undefined)
 })
 
+// 260910 Red: 缺口大于可压缩总量时不能死锁 —— 要求被压到物理上限，压满全部可压内容即达标。
+test("caps the recovery requirement at what is physically compressible", () => {
+    const state = recoveringState()
+    // 缺口 100K，但全部可压内容只有 40K：要求被压到 40K - 2K 摘要 = 38K，刚好达标
+    assert.equal(
+        checkRecoveryBudget(state, "m0001", "m0012", 40_000, 2_000, 100_000, 40_000),
+        undefined,
+    )
+})
+
+test("still rejects a batch that leaves compressible history behind", () => {
+    const state = recoveringState()
+    // 可压 40K 却只选 10K：即使压满也够不到上限，继续拒并要求换更大的范围
+    const failure = checkRecoveryBudget(state, "m0001", "m0004", 10_000, 2_000, 100_000, 40_000)
+
+    assert.ok(failure)
+    assert.equal(failure.reason, "insufficient-recovery")
+    assert.equal(failure.requiredNetSavings, 38_000)
+    assert.equal(failure.actualNetSavings, 8_000)
+})
+
+test("keeps the old strict behaviour when the compressible cap is not supplied", () => {
+    const state = recoveringState()
+    const failure = checkRecoveryBudget(state, "m0001", "m0009", 40_000, 2_000, 100_000)
+
+    assert.ok(failure)
+    assert.equal(failure.requiredNetSavings, 100_000)
+})
+
 test("does not gate outside emergency recovery", () => {
     // 手动压一小段、收益档压单条消息都不该被拦——要拦的是被提醒逼着交差那一种
     const state = createSessionState()

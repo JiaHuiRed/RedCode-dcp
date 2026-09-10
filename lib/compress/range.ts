@@ -32,7 +32,11 @@ import {
     formatViabilityRejection,
     type ViabilityFailure,
 } from "./viability"
-import { getModelInfo, resolveRecoveryTarget } from "../messages/inject/utils"
+import {
+    collectUncompressedLedger,
+    getModelInfo,
+    resolveRecoveryTarget,
+} from "../messages/inject/utils"
 import { getCurrentTokenUsage } from "../token-utils"
 
 function buildSchema(runtimePrompts: string) {
@@ -200,6 +204,12 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                     ctx.state.nudges.recovering && recoveryTarget !== undefined
                         ? Math.max(0, getCurrentTokenUsage(ctx.state, rawMessages) - recoveryTarget)
                         : 0
+                // 260910 Red 可压缩上限：当前窗口里尚未进块的消息总量。缺口大于它时，
+                // 要求一次压出物理上不存在的节省只会把每次提交都拒掉（理由见 viability.ts）。
+                const availableTokens = collectUncompressedLedger(
+                    ctx.state,
+                    rawMessages,
+                ).reduce((total, entry) => total + entry.tokens, 0)
                 const selectionTokens = preparedPlans.reduce(
                     (total, plan) =>
                         total + estimateNewlyCompressedTokens(ctx.state, plan.selection),
@@ -219,6 +229,7 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                         selectionTokens,
                         summaryTokens,
                         requiredNetSavings,
+                        availableTokens,
                     )
                     if (failure) {
                         viabilityFailures.push(failure)

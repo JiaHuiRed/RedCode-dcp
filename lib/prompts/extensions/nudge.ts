@@ -84,7 +84,17 @@ export function buildRecoveryBudgetGuidance(budget: RecoveryBudget): string {
     // 摘要也占上下文。按 10% 预留能让大多数摘要在第一次成功调用就真正回到目标线；
     // 工具端仍按实际摘要 token 硬验，模型写得过长时不会静默放行。
     const selectionTarget = Math.ceil(deficit / (1 - RECOVERY_SUMMARY_HEADROOM))
+    // 260914 Red: 缺口大于全部剩余可压内容时，「选一个覆盖目标的 endId」是物理上不存在的
+    // 指令——实测缺口 124.9K 而可压总量只有 3.8K，模型拿到自相矛盾的预算表只能反复试错。
+    // 封顶档改用覆盖率语义：一把压满全部剩余历史即算完成（工具端按覆盖率 ≥95% 放行，
+    // 见 viability.checkRecoveryBudget）。
+    const available = budget.uncompressed.reduce((total, entry) => total + entry.tokens, 0)
+    if (available <= 0) {
+        return ""
+    }
+    const capped = selectionTarget > available
     const first = budget.uncompressed[0]!
+    const last = budget.uncompressed[budget.uncompressed.length - 1]!
     const rows: string[] = []
     let cumulative = 0
     let covered = false
@@ -93,18 +103,32 @@ export function buildRecoveryBudgetGuidance(budget: RecoveryBudget): string {
     for (let index = 0; index < budget.uncompressed.length; index++) {
         const entry = budget.uncompressed[index]!
         cumulative += entry.tokens
-        const covers = !covered && cumulative >= selectionTarget
+        const covers = !capped && !covered && cumulative >= selectionTarget
         if (covers) {
             covered = true
         }
-        const isCheckpoint =
-            index % stride === stride - 1 || index === budget.uncompressed.length - 1
+        const isLast = index === budget.uncompressed.length - 1
+        const isCheckpoint = index % stride === stride - 1 || isLast
         if (!covers && !isCheckpoint) {
             continue
         }
-        rows.push(
-            `    ${first.ref}..${entry.ref} = ${fmt(cumulative)}${covers ? "   <- smallest range that covers the budget" : ""}`,
-        )
+        const mark = covers
+            ? "   <- smallest range that covers the budget"
+            : capped && isLast
+              ? "   <- all remaining compressible history"
+              : ""
+        rows.push(`    ${first.ref}..${entry.ref} = ${fmt(cumulative)}${mark}`)
+    }
+
+    if (capped) {
+        return [
+            "RECOVERY BUDGET",
+            `- Context is ${fmt(budget.currentTokens)}; the recovery target is ${fmt(budget.target)} (deficit ${fmt(deficit)}). The remaining compressible history totals only ${fmt(available)} — the rest of the context is system prompt, tool schemas, protected content and existing blocks, which compression cannot shrink.`,
+            `- Cumulative size of the oldest uncompressed history, starting at ${first.ref}:`,
+            ...rows,
+            `- Use ${first.ref} as startId and ${last.ref} as endId to compress the WHOLE remaining history in one pass. That is the maximum possible; a full-coverage pass counts as complete even though it cannot close the whole deficit.`,
+            "- These sizes exclude history already inside compressed blocks, so they are the real savings on offer.",
+        ].join("\n")
     }
 
     return [

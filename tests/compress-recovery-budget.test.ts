@@ -28,6 +28,27 @@ test("marks the smallest range with summary headroom", () => {
     assert.ok(text.includes("Use m0001 as startId"))
 })
 
+// 260914 Red: 封顶档——缺口大于全部可压内容时，「选一个覆盖目标的 endId」是物理上不存在
+// 的指令。预算表必须给出可达的话术：一把全压即完成（工具端按覆盖率 ≥95% 放行）。
+test("capped: asks for the whole remaining history when the deficit exceeds it", () => {
+    // 哥哥会话 09-14 的实测形状：缺口 41.1K，剩余可压总量 17.6K。
+    const text = buildRecoveryBudgetGuidance({
+        currentTokens: 201_100,
+        target: 160_000,
+        uncompressed: ledger(4, 4_400),
+    })
+
+    assert.ok(text.includes("totals only ~17.6K"))
+    assert.ok(text.includes("WHOLE remaining history"))
+    assert.ok(text.includes("m0001 as startId and m0004 as endId"))
+    assert.ok(!text.includes("covers the marked target"))
+    const marked = text
+        .split("\n")
+        .filter((line) => line.includes("<- all remaining compressible history"))
+    assert.equal(marked.length, 1)
+    assert.ok(marked[0]!.includes("m0001..m0004"), marked[0])
+})
+
 test("stays compact on a long history", () => {
     const text = buildRecoveryBudgetGuidance({
         currentTokens: 250_000,

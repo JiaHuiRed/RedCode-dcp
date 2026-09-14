@@ -35,6 +35,9 @@ import {
 } from "./utils"
 import { getCurrentTokenUsage } from "../../token-utils"
 
+// 260914 Red: 紧急档里剩余可压总量低于缺口的这个比例时，压缩的收益抵不上一次前缀重建。
+const MIN_RECOVERY_SHARE = 0.1
+
 export const injectCompressNudges = (
     state: SessionState,
     config: PluginConfig,
@@ -81,16 +84,28 @@ export const injectCompressNudges = (
     // 每次都是缓存重置点。实测 ses_ffe5f9fca1 压了 9 次，其中 2 次净增（最小一次压 20
     // token、摘要 140 token）。min 与 max 之间那段是配置里留好的余量，恢复就该一次到位。
     const recoveryTarget = resolveRecoveryTarget(config, state, providerId, modelId)
-    if (overMaxLimit) {
+    // 260914 Red: 可压内容远不足以覆盖缺口时，武装紧急档只会逼模型交出无意义的微型压缩。
+    // 实测（哥哥会话 09-14）：缺口 124.9K 而剩余可压总量只有 3.8K，模型被追问两次仍在原地，
+    // 每次还要付一次前缀缓存重置。可压总量低于缺口的 MIN_RECOVERY_SHARE 时维持静默，
+    // 等新内容把可压量抬起来再武装。
+    const deficit =
+        recoveryTarget === undefined ? 0 : Math.max(0, currentTokens - recoveryTarget)
+    const uncompressedLedger =
+        overMaxLimit || state.nudges.recovering
+            ? collectUncompressedLedger(state, messages)
+            : []
+    const availableTokens = uncompressedLedger.reduce((total, entry) => total + entry.tokens, 0)
+    const worthless = deficit > 0 && availableTokens < deficit * MIN_RECOVERY_SHARE
+    if (overMaxLimit && !worthless) {
         state.nudges.recovering = true
     } else if (
         state.nudges.recovering &&
-        (recoveryTarget === undefined || currentTokens <= recoveryTarget)
+        (recoveryTarget === undefined || currentTokens <= recoveryTarget || worthless)
     ) {
         state.nudges.recovering = false
         anchorsChanged = true
     }
-    const emergencyActive = overMaxLimit || state.nudges.recovering
+    const emergencyActive = (overMaxLimit || state.nudges.recovering) && !worthless
 
     if (justCompressed) {
         // 非紧急三档照旧清空：刚压过就别连环催。
@@ -222,7 +237,7 @@ export const injectCompressNudges = (
             ? {
                   currentTokens,
                   target: recoveryTarget,
-                  uncompressed: collectUncompressedLedger(state, messages),
+                  uncompressed: uncompressedLedger,
               }
             : undefined
 

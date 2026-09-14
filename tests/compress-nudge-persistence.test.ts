@@ -140,11 +140,28 @@ function seedBlock(state: SessionState, compressedTokens: number, summaryTokens:
     state.prune.messages.activeBlockIds.add(1)
 }
 
+// 260914 Red: 紧急档现在只在"剩余可压内容够得着缺口"时才武装（inject.ts 的
+// MIN_RECOVERY_SHARE），这些用例的既定前提是"还有大量可压历史"，显式构造出来。
+function seedCompressibleHistory(state: SessionState, messages: WithParts[]): void {
+    for (const [index, message] of messages.entries()) {
+        state.messageIds.byRawId.set(message.info.id, `m${String(index + 1).padStart(4, "0")}`)
+    }
+    const last = messages[messages.length - 1]!
+    last.parts.push({
+        id: "msg-compressible-history",
+        messageID: last.info.id,
+        sessionID: SESSION,
+        type: "text" as const,
+        text: "hello world ".repeat(6_000),
+    } as unknown as WithParts["parts"][number])
+}
+
 test("an ineffective compress does not silence the emergency nudge", () => {
     // 250K 上下文，这次 compress 只净省 3K —— 哥哥 08-30 在家遇到的形状。
     const messages = buildJustCompressedMessages(249_900)
     const state = createSessionState()
     seedBlock(state, 4_000, 1_000)
+    seedCompressibleHistory(state, messages)
     state.nudges.turnNudgeAnchors.add(ASSISTANT_ID)
     state.nudges.absoluteNudgeAnchors.add(ASSISTANT_ID)
 
@@ -184,6 +201,7 @@ test("a compress landing between min and max keeps the emergency nudge", () => {
     const state = createSessionState()
     state.nudges.recovering = true // 上一轮过 max 时置的位
     seedBlock(state, 55_000, 5_000)
+    seedCompressibleHistory(state, messages)
 
     injectCompressNudges(state, buildConfig(), new Logger(false), messages, prompts)
 
@@ -211,8 +229,35 @@ test("recovery ends once context reaches min", () => {
 test("crossing max arms recovery even before any compression", () => {
     const messages = buildJustCompressedMessages(230_000)
     const state = createSessionState()
+    seedCompressibleHistory(state, messages)
     // 没有 block，pendingSavings = 0；230K > max(220K)
     injectCompressNudges(state, buildConfig(), new Logger(false), messages, prompts)
 
     assert.equal(state.nudges.recovering, true)
+})
+
+// 260914 Red: 哥哥会话 09-14 的实测形状——上下文 250K，可压历史只剩 ~4K，缺口 97K。
+// 压了也回不到线，催促只会换来微型压缩 + 缓存重建，此时保持静默（等新内容把可压量抬起来）。
+test("a tiny compressible remainder does not arm the emergency nudge", () => {
+    const messages = buildJustCompressedMessages(249_900)
+    const state = createSessionState()
+    state.nudges.recovering = true
+    seedBlock(state, 4_000, 1_000)
+    for (const [index, message] of messages.entries()) {
+        state.messageIds.byRawId.set(message.info.id, `m${String(index + 1).padStart(4, "0")}`)
+    }
+    messages[1]!.parts.push({
+        id: "msg-tiny-remainder",
+        messageID: ASSISTANT_ID,
+        sessionID: SESSION,
+        type: "text" as const,
+        text: "y".repeat(8_000),
+    } as unknown as WithParts["parts"][number])
+
+    injectCompressNudges(state, buildConfig(), new Logger(false), messages, prompts)
+
+    assert.equal(state.nudges.recovering, false)
+    assert.equal(state.nudges.contextLimitAnchors.size, 0)
+    const text = messages[1]!.parts.find((p: any) => p.type === "text") as any
+    assert.ok(!text.text.includes("EMERGENCY CONTEXT REMINDER"))
 })

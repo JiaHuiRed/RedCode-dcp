@@ -117,6 +117,34 @@ test("compression outcome tells the model it is still above the emergency thresh
     assert.ok(result.includes("Do not report completion yet."))
 })
 
+// 260914 Red: 恢复档压满全部可压内容后不能再喊「继续压」——上下文里剩下的是压不动的
+// 部分，再压只能换来一次微型压缩 + 缓存重建（哥哥会话 09-14 的实测形状）。
+test("a saturated pass stops pushing instead of asking for another round", () => {
+    const state = createSessionState()
+    state.nudges.recovering = true
+    const config = buildConfig(220_000, 150_000)
+
+    const result = formatCompressionOutcome(state, config, reportedUsage(249_999), 100_000, 10_000, {
+        saturated: true,
+    })
+
+    assert.ok(result.includes("as small as compression can make it"))
+    assert.ok(result.includes("Report the situation instead of compressing again."))
+    assert.ok(!result.includes("Do not report completion yet."))
+    assert.ok(!result.includes("you must remove about"))
+})
+
+test("recovery still pushes while the compressible history was not exhausted", () => {
+    const state = createSessionState()
+    state.nudges.recovering = true
+    const config = buildConfig(220_000, 150_000)
+
+    const result = formatCompressionOutcome(state, config, reportedUsage(249_999), 10_000, 1_000)
+
+    assert.ok(result.includes("you must remove about"))
+    assert.ok(result.includes("Do not report completion yet."))
+})
+
 test("compression outcome stops pushing once the context drops below both thresholds", () => {
     const state = createSessionState()
     const config = buildConfig(220_000, 150_000)

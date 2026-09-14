@@ -192,33 +192,26 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                     viabilityFailures.push(failure)
                 }
             }
+            const { providerId, modelId } = getModelInfo(rawMessages)
+            const recoveryTarget = resolveRecoveryTarget(ctx.config, ctx.state, providerId, modelId)
+            const recovering = ctx.state.nudges.recovering && recoveryTarget !== undefined
+            const requiredNetSavings = recovering
+                ? Math.max(0, getCurrentTokenUsage(ctx.state, rawMessages) - recoveryTarget)
+                : 0
+            // 260910 Red 可压缩上限：当前窗口里尚未进块的消息总量。缺口大于它时，
+            // 要求一次压出物理上不存在的节省只会把每次提交都拒掉（理由见 viability.ts）。
+            const availableTokens = recovering
+                ? collectUncompressedLedger(ctx.state, rawMessages).reduce(
+                      (total, entry) => total + entry.tokens,
+                      0,
+                  )
+                : 0
+            const selectionTokens = preparedPlans.reduce(
+                (total, plan) => total + estimateNewlyCompressedTokens(ctx.state, plan.selection),
+                0,
+            )
+            const summaryTokens = storedSummaryTokens.reduce((total, tokens) => total + tokens, 0)
             if (viabilityFailures.length === 0 && preparedPlans.length > 0) {
-                const { providerId, modelId } = getModelInfo(rawMessages)
-                const recoveryTarget = resolveRecoveryTarget(
-                    ctx.config,
-                    ctx.state,
-                    providerId,
-                    modelId,
-                )
-                const requiredNetSavings =
-                    ctx.state.nudges.recovering && recoveryTarget !== undefined
-                        ? Math.max(0, getCurrentTokenUsage(ctx.state, rawMessages) - recoveryTarget)
-                        : 0
-                // 260910 Red 可压缩上限：当前窗口里尚未进块的消息总量。缺口大于它时，
-                // 要求一次压出物理上不存在的节省只会把每次提交都拒掉（理由见 viability.ts）。
-                const availableTokens = collectUncompressedLedger(
-                    ctx.state,
-                    rawMessages,
-                ).reduce((total, entry) => total + entry.tokens, 0)
-                const selectionTokens = preparedPlans.reduce(
-                    (total, plan) =>
-                        total + estimateNewlyCompressedTokens(ctx.state, plan.selection),
-                    0,
-                )
-                const summaryTokens = storedSummaryTokens.reduce(
-                    (total, tokens) => total + tokens,
-                    0,
-                )
                 const firstPlan = preparedPlans[0]
                 const lastPlan = preparedPlans.at(-1)
                 if (firstPlan && lastPlan) {
@@ -285,6 +278,10 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
 
             await finalizeSession(ctx, toolCtx, rawMessages, notifications, input.topic)
 
+            // 260914 Red: 与 checkRecoveryBudget 的覆盖率判据同口径——本轮压满全部可压
+            // 内容时，收尾文案不再喊「继续压」（那只会换来微型压缩 + 缓存重建）。
+            const saturated = availableTokens > 0 && selectionTokens / availableTokens >= 0.95
+
             return [
                 `Compressed ${totalCompressedMessages} messages into ${COMPRESSED_BLOCK_HEADER}.`,
                 formatCompressionOutcome(
@@ -293,6 +290,7 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                     rawMessages,
                     totalCompressedTokens,
                     totalSummaryTokens,
+                    { saturated },
                 ),
             ].join(" ")
         },

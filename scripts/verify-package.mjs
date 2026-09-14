@@ -1,12 +1,23 @@
 import { builtinModules, createRequire } from "node:module"
-import { existsSync, readFileSync, statSync } from "node:fs"
+import {
+    cpSync,
+    existsSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    statSync,
+    writeFileSync,
+} from "node:fs"
 import { execFileSync } from "node:child_process"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
 
 const require = createRequire(import.meta.url)
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm"
+const packArgs = ["pack", "--dry-run", "--json"]
 
 const builtinNames = new Set([
     ...builtinModules,
@@ -48,8 +59,7 @@ const forbiddenTarballPatterns = [
 const packageInfoCache = new Map()
 
 function fail(message) {
-    console.error(`package verification failed: ${message}`)
-    process.exit(1)
+    throw new Error(`package verification failed: ${message}`)
 }
 
 function assertRepoFilesExist() {
@@ -210,36 +220,70 @@ function validateRuntimeImportGraph() {
     }
 }
 
-function validatePackedFiles() {
-    const output = execFileSync("npm", ["pack", "--dry-run", "--json"], {
-        cwd: root,
+function pack(cwd) {
+    if (process.platform === "win32") {
+        return execFileSync(
+            process.env.ComSpec ?? "cmd.exe",
+            ["/d", "/s", "/c", [npmCommand, ...packArgs].join(" ")],
+            {
+                cwd,
+                encoding: "utf8",
+            },
+        )
+    }
+
+    return execFileSync(npmCommand, packArgs, {
+        cwd,
         encoding: "utf8",
     })
-
-    const [result] = JSON.parse(output)
-    if (!result || !Array.isArray(result.files)) {
-        fail("npm pack --dry-run --json did not return file metadata")
-    }
-
-    const packedPaths = result.files.map((file) => file.path)
-    for (const required of requiredTarballFiles) {
-        if (!packedPaths.includes(required)) {
-            fail(`packed tarball is missing ${required}`)
-        }
-    }
-
-    const forbidden = packedPaths.find((file) =>
-        forbiddenTarballPatterns.some((pattern) => pattern.test(file)),
-    )
-    if (forbidden) {
-        fail(`packed tarball contains forbidden path ${forbidden}`)
-    }
-
-    console.log(`package verification passed for ${result.name}@${result.version}`)
-    console.log(`tarball entries: ${result.entryCount}`)
 }
 
-assertRepoFilesExist()
-assertPackageJsonShape()
-validateRuntimeImportGraph()
-validatePackedFiles()
+function validatePackedFiles() {
+    const stagingRoot = mkdtempSync(path.join(tmpdir(), "redcode-dcp-package-"))
+    try {
+        // npm pack runs prepare in the source tree; stage only package files so it cannot clean dist/.
+        const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"))
+        delete packageJson.scripts
+        writeFileSync(path.join(stagingRoot, "package.json"), JSON.stringify(packageJson))
+        for (const relativePath of ["dist", "lib", "tui.tsx", "README.md", "LICENSE"]) {
+            cpSync(path.join(root, relativePath), path.join(stagingRoot, relativePath), {
+                recursive: true,
+            })
+        }
+
+        const output = pack(stagingRoot)
+        const [result] = JSON.parse(output)
+        if (!result || !Array.isArray(result.files)) {
+            fail("npm pack --dry-run --json did not return file metadata")
+        }
+
+        const packedPaths = result.files.map((file) => file.path)
+        for (const required of requiredTarballFiles) {
+            if (!packedPaths.includes(required)) {
+                fail(`packed tarball is missing ${required}`)
+            }
+        }
+
+        const forbidden = packedPaths.find((file) =>
+            forbiddenTarballPatterns.some((pattern) => pattern.test(file)),
+        )
+        if (forbidden) {
+            fail(`packed tarball contains forbidden path ${forbidden}`)
+        }
+
+        console.log(`package verification passed for ${result.name}@${result.version}`)
+        console.log(`tarball entries: ${result.entryCount}`)
+    } finally {
+        rmSync(stagingRoot, { recursive: true, force: true })
+    }
+}
+
+try {
+    assertRepoFilesExist()
+    assertPackageJsonShape()
+    validateRuntimeImportGraph()
+    validatePackedFiles()
+} catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exitCode = 1
+}

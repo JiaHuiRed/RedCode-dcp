@@ -252,7 +252,13 @@ function validatePackedFiles() {
         }
 
         const output = pack(stagingRoot)
-        const [result] = JSON.parse(output)
+        // 260915 Red npm 11 keys the result by package name while older npm emits an array.
+        const packed = JSON.parse(output)
+        const result = Array.isArray(packed)
+            ? packed[0]
+            : Array.isArray(packed.files)
+              ? packed
+              : Object.values(packed)[0]
         if (!result || !Array.isArray(result.files)) {
             fail("npm pack --dry-run --json did not return file metadata")
         }

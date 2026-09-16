@@ -62,7 +62,7 @@ function fmt(n: number): string {
 }
 
 const LEDGER_ROWS = 8
-const RECOVERY_SUMMARY_HEADROOM = 0.1
+const RECOVERY_SUMMARY_HEADROOM = 0.15
 
 /**
  * 紧急档恢复时把**预算和尺寸**给到模型。
@@ -81,8 +81,10 @@ export function buildRecoveryBudgetGuidance(budget: RecoveryBudget): string {
         return ""
     }
 
-    // 摘要也占上下文。按 10% 预留能让大多数摘要在第一次成功调用就真正回到目标线；
+    // 摘要也占上下文。按 15% 预留让多数摘要在第一次成功调用就真正回到目标线；
     // 工具端仍按实际摘要 token 硬验，模型写得过长时不会静默放行。
+    // 260916 Red: 实测 10% 覆盖不了任务交接型摘要 —— 一次恢复里选中 79.3K、模型写
+    // 13.9K 摘要（17.5%），净省差 3.3K 被拒；重写摘要又把缺口从 68.7K 推到 80.2K。
     const selectionTarget = Math.ceil(deficit / (1 - RECOVERY_SUMMARY_HEADROOM))
     // 260914 Red: 缺口大于全部剩余可压内容时，「选一个覆盖目标的 endId」是物理上不存在的
     // 指令——实测缺口 124.9K 而可压总量只有 3.8K，模型拿到自相矛盾的预算表只能反复试错。
@@ -133,7 +135,8 @@ export function buildRecoveryBudgetGuidance(budget: RecoveryBudget): string {
 
     return [
         "RECOVERY BUDGET",
-        `- Context is ${fmt(budget.currentTokens)}; the recovery target is ${fmt(budget.target)}. You must net at least ${fmt(deficit)} in ONE pass, so select about ${fmt(selectionTarget)} of raw history to leave 10% summary headroom.`,
+        `- Context is ${fmt(budget.currentTokens)}; the recovery target is ${fmt(budget.target)}. You must net at least ${fmt(deficit)} in ONE pass, so select about ${fmt(selectionTarget)} of raw history to leave ${Math.round(RECOVERY_SUMMARY_HEADROOM * 100)}% summary headroom.`,
+        "- That headroom is an estimate: if your summary will run longer, extend the range past the marked row - the tool validates against the real summary size.",
         `- Cumulative size of the oldest uncompressed history, starting at ${first.ref}:`,
         ...rows,
         `- Use ${first.ref} as startId. Pick the endId whose cumulative size covers the marked target. A smaller recovery batch is rejected before it resets the prefix cache.`,

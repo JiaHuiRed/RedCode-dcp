@@ -503,8 +503,17 @@ export function collectUncompressedLedger(
     messages: WithParts[],
 ): RecoveryBudget["uncompressed"] {
     const ledger: RecoveryBudget["uncompressed"] = []
+    // 260916 Red: 最后一条 assistant 消息不算可压内容 —— 它是「当前活跃上下文」（模型刚
+    //   落笔的那条，含本轮工具结果、或被拒后的重试），DCP 自己的指引也要求
+    //   Keep active context uncompressed。此前它被算进 availableTokens 分母：模型从 OLDEST
+    //   压到「够本」处停下时，覆盖率天然差最后几条，卡在 0.95 之下 —— 分明已压满可压部分，
+    //   却掉进严格判据被拒。账本展示与工具判据共用本函数，两侧同时修正。
+    const lastAssistantId = messages.findLast((message) => message.info.role === "assistant")?.info.id
     for (const message of messages) {
         if (isIgnoredUserMessage(message)) {
+            continue
+        }
+        if (message.info.id === lastAssistantId) {
             continue
         }
         const ref = state.messageIds.byRawId.get(message.info.id)

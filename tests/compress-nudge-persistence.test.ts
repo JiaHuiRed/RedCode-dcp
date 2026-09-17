@@ -143,17 +143,32 @@ function seedBlock(state: SessionState, compressedTokens: number, summaryTokens:
 // 260914 Red: 紧急档现在只在"剩余可压内容够得着缺口"时才武装（inject.ts 的
 // MIN_RECOVERY_SHARE），这些用例的既定前提是"还有大量可压历史"，显式构造出来。
 function seedCompressibleHistory(state: SessionState, messages: WithParts[]): void {
+    // 260918 Red: 可压历史必须挂在「更早的」assistant 上。collectUncompressedLedger 自
+    //   260916 起排除最后一条 assistant（活跃上下文不算可压内容），原先挂在它上面会让
+    //   availableTokens 归零，MIN_RECOVERY_SHARE 判据直接把紧急档掐掉——而本组用例的
+    //   既定前提恰恰是「还有大量可压历史」，故显式造一条更早的 assistant 来承载。
+    messages.splice(1, 0, {
+        info: {
+            id: "msg-assistant-history",
+            role: "assistant",
+            sessionID: SESSION,
+            agent: "assistant",
+            time: { created: 1.5 },
+            tokens: { input: 1_000, output: 10 },
+        } as unknown as WithParts["info"],
+        parts: [
+            {
+                id: "msg-compressible-history",
+                messageID: "msg-assistant-history",
+                sessionID: SESSION,
+                type: "text" as const,
+                text: "hello world ".repeat(6_000),
+            } as unknown as WithParts["parts"][number],
+        ],
+    })
     for (const [index, message] of messages.entries()) {
         state.messageIds.byRawId.set(message.info.id, `m${String(index + 1).padStart(4, "0")}`)
     }
-    const last = messages[messages.length - 1]!
-    last.parts.push({
-        id: "msg-compressible-history",
-        messageID: last.info.id,
-        sessionID: SESSION,
-        type: "text" as const,
-        text: "hello world ".repeat(6_000),
-    } as unknown as WithParts["parts"][number])
 }
 
 test("an ineffective compress does not silence the emergency nudge", () => {
@@ -169,7 +184,7 @@ test("an ineffective compress does not silence the emergency nudge", () => {
 
     // 紧急档必须留着，并且实际注入到当前最后一条消息上。
     assert.equal(state.nudges.contextLimitAnchors.has(ASSISTANT_ID), true)
-    const text = messages[1]!.parts.find((p: any) => p.type === "text") as any
+    const text = messages.find((m) => m.info.id === ASSISTANT_ID)!.parts.find((p: any) => p.type === "text") as any
     assert.ok(text.text.includes("EMERGENCY CONTEXT REMINDER"))
 
     // 非紧急三档照旧让位，避免连环催。
@@ -187,7 +202,7 @@ test("an effective compress clears the emergency nudge", () => {
     injectCompressNudges(state, buildConfig(), new Logger(false), messages, prompts)
 
     assert.equal(state.nudges.contextLimitAnchors.size, 0)
-    const text = messages[1]!.parts.find((p: any) => p.type === "text") as any
+    const text = messages.find((m) => m.info.id === ASSISTANT_ID)!.parts.find((p: any) => p.type === "text") as any
     assert.ok(!text.text.includes("EMERGENCY CONTEXT REMINDER"))
 })
 
@@ -207,7 +222,7 @@ test("a compress landing between min and max keeps the emergency nudge", () => {
 
     assert.equal(state.nudges.recovering, true)
     assert.equal(state.nudges.contextLimitAnchors.has(ASSISTANT_ID), true)
-    const text = messages[1]!.parts.find((p: any) => p.type === "text") as any
+    const text = messages.find((m) => m.info.id === ASSISTANT_ID)!.parts.find((p: any) => p.type === "text") as any
     assert.ok(text.text.includes("EMERGENCY CONTEXT REMINDER"))
 })
 
@@ -222,7 +237,7 @@ test("recovery ends once context reaches min", () => {
 
     assert.equal(state.nudges.recovering, false)
     assert.equal(state.nudges.contextLimitAnchors.size, 0)
-    const text = messages[1]!.parts.find((p: any) => p.type === "text") as any
+    const text = messages.find((m) => m.info.id === ASSISTANT_ID)!.parts.find((p: any) => p.type === "text") as any
     assert.ok(!text.text.includes("EMERGENCY CONTEXT REMINDER"))
 })
 
@@ -258,6 +273,6 @@ test("a tiny compressible remainder does not arm the emergency nudge", () => {
 
     assert.equal(state.nudges.recovering, false)
     assert.equal(state.nudges.contextLimitAnchors.size, 0)
-    const text = messages[1]!.parts.find((p: any) => p.type === "text") as any
+    const text = messages.find((m) => m.info.id === ASSISTANT_ID)!.parts.find((p: any) => p.type === "text") as any
     assert.ok(!text.text.includes("EMERGENCY CONTEXT REMINDER"))
 })

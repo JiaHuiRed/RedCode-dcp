@@ -13,7 +13,7 @@ function ledger(count: number, tokensEach: number) {
 }
 
 test("marks the smallest range with summary headroom", () => {
-    // 净缺口 100K，预留 15% 摘要空间后需约 117.6K：每条 10K，累计到第 12 条。
+    // 净缺口 100K，12K 摘要下限后需约 112K：每条 10K，累计到第 12 条。
     const text = buildRecoveryBudgetGuidance({
         currentTokens: 250_000,
         target: 150_000,
@@ -21,12 +21,28 @@ test("marks the smallest range with summary headroom", () => {
     })
 
     assert.ok(text.includes("must net at least ~100.0K"))
-    assert.ok(text.includes("select about ~117.6K"))
-    assert.ok(text.includes("extend the range past the marked row"))
+    assert.ok(text.includes("select about ~112.0K"))
+    assert.ok(text.includes("keep your summary under ~12.0K"))
+    assert.ok(text.includes("If your summary needs more than that budget"))
     const marked = text.split("\n").filter((line) => line.includes("<- smallest range"))
     assert.equal(marked.length, 1)
     assert.ok(marked[0]!.includes("m0001..m0012"), marked[0])
     assert.ok(text.includes("Use m0001 as startId"))
+})
+
+test("scales summary budget for a large recovery", () => {
+    // 200K 缺口超过 12K 下限，按 10% 预留 20K；每条 10K，累计到第 22 条。
+    const text = buildRecoveryBudgetGuidance({
+        currentTokens: 350_000,
+        target: 150_000,
+        uncompressed: ledger(30, 10_000),
+    })
+
+    assert.ok(text.includes("select about ~220.0K"))
+    assert.ok(text.includes("keep your summary under ~20.0K"))
+    const marked = text.split("\n").filter((line) => line.includes("<- smallest range"))
+    assert.equal(marked.length, 1)
+    assert.ok(marked[0]!.includes("m0001..m0022"), marked[0])
 })
 
 // 260914 Red: 封顶档——缺口大于全部可压内容时，「选一个覆盖目标的 endId」是物理上不存在

@@ -93,8 +93,9 @@ export function getModelInfo(messages: WithParts[]): LastUserModelContext {
 
 // 260831 cc: 每模型触发线的查表键是 `${providerID}/${modelID}`，写错 provider 会静默回落到
 // 全局默认值——2026-08-11 实测这就是「新 DCP 却像旧行为」的成因，当时全程没有任何日志。
-// 只在用户确实配了每模型触发线却没命中时报，同一个键每进程报一次。
-const warnedModelLimitKeys = new Set<string>()
+// 只在用户确实配了每模型触发线却没命中时报。260921 Red 去重从模块级 Set 改挂
+// state.warnedModelLimitKeys（每会话一次）：进程级去重让后续每个新会话永远听不到告警，
+// 惯犯坑（260811/260902/260904/260910/260921 五犯）要靠"每次会话都响"才能被注意到。
 
 export interface ModelLimitMiss {
     key: string
@@ -143,11 +144,6 @@ export function detectModelLimitMiss(
         return undefined
     }
 
-    if (warnedModelLimitKeys.has(key)) {
-        return undefined
-    }
-    warnedModelLimitKeys.add(key)
-
     return { key, thresholds, sameModelKeys: [...sameModelKeys].sort() }
 }
 
@@ -155,6 +151,7 @@ export async function reportModelLimitMiss(
     client: any,
     logger: Logger,
     config: PluginConfig,
+    state: SessionState,
     messages: WithParts[],
 ): Promise<void> {
     const { providerId, modelId } = getModelInfo(messages)
@@ -163,8 +160,17 @@ export async function reportModelLimitMiss(
         return
     }
 
+    // 260921 Red 每会话每键一次：新会话必须重新听到这个告警——静默回落是五犯的老坑。
+    if (state.warnedModelLimitKeys.has(miss.key)) {
+        return
+    }
+    state.warnedModelLimitKeys.add(miss.key)
+
     const tables = miss.thresholds.map((t) => (t === "max" ? "modelMaxLimits" : "modelMinLimits"))
-    const lines = [`${miss.key} 未配置 ${tables.join(" / ")}，已回落到全局触发线。`]
+    const lines = [
+        `${miss.key} 未配置 ${tables.join(" / ")}，已回落到全局触发线（50k 劝说 / 100k 强制）。`,
+        "若该模型上下文 ≥500k，会在 100k 被紧急档反复压缩——请在 ~/.redcode/dcp.jsonc 两张表补键。每个新会话都会提醒一次，补键后消失。",
+    ]
     if (miss.sameModelKeys.length > 0) {
         lines.push(`同名模型已配置的键：${miss.sameModelKeys.join(", ")}`)
     }
@@ -181,7 +187,7 @@ export async function reportModelLimitMiss(
                 title: "DCP: 每模型触发线未命中",
                 message: lines.join("\n"),
                 variant: "warning",
-                duration: 8000,
+                duration: 12000,
             },
         })
     } catch {}

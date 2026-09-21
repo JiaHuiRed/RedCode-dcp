@@ -118,4 +118,7 @@ export interface SessionState {
     currentTurn: number
     modelContextLimit: number | undefined
     systemPromptTokens: number | undefined
+    // 260921 Red 每会话已告警的触发线键。此前去重用模块级 Set——每进程只报一次，
+    // 后续会话永远听不到告警，toast 形同虚设。挂在 state 上随会话生命周期隔离。
+    warnedModelLimitKeys: Set<string>
 }

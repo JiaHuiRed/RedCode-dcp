@@ -93,13 +93,14 @@ export function getModelInfo(messages: WithParts[]): LastUserModelContext {
 
 // 260831 cc: 每模型触发线的查表键是 `${providerID}/${modelID}`，写错 provider 会静默回落到
 // 全局默认值——2026-08-11 实测这就是「新 DCP 却像旧行为」的成因，当时全程没有任何日志。
-// 只在用户确实配了每模型触发线却没命中时报。260921 Red 去重从模块级 Set 改挂
+// 非空表缺键必报；空表只在已知模型上下文 >=500k 时告警，避免小窗口模型误报。
+// 260921 Red 去重从模块级 Set 改挂
 // state.warnedModelLimitKeys（每会话一次）：进程级去重让后续每个新会话永远听不到告警，
 // 惯犯坑（260811/260902/260904/260910/260921 五犯）要靠"每次会话都响"才能被注意到。
 
 export interface ModelLimitMiss {
     key: string
-    // 只报「配了但没命中」的那一档；另一档没配就是本来就打算走全局值。
+    // 非空表缺键，或大窗口模型遇到空表；小窗口模型允许使用全局触发线。
     thresholds: Array<"max" | "min">
     // 已配置的键里 modelID 相同、provider 不同的那些——写错 provider 时这就是直接答案。
     sameModelKeys: string[]
@@ -109,6 +110,7 @@ export function detectModelLimitMiss(
     config: PluginConfig,
     providerId: string | undefined,
     modelId: string | undefined,
+    modelContextLimit?: number,
 ): ModelLimitMiss | undefined {
     if (providerId === undefined || modelId === undefined) {
         return undefined
@@ -125,12 +127,13 @@ export function detectModelLimitMiss(
     const key = `${providerId}/${modelId}`
     const thresholds: Array<"max" | "min"> = []
     const sameModelKeys = new Set<string>()
+    // 260924 Red 全表缺失/为空也要提醒大窗口模型；未知窗口仍按原规则只查非空表。
+    const largeContext = modelContextLimit !== undefined && modelContextLimit >= 500_000
 
     for (const { threshold, limits } of tables) {
-        if (!limits) continue
-        const configuredKeys = Object.keys(limits)
-        if (configuredKeys.length === 0) continue
-        if (limits[key] !== undefined) continue
+        const configuredKeys = Object.keys(limits ?? {})
+        if (configuredKeys.length === 0 && !largeContext) continue
+        if (limits?.[key] !== undefined) continue
 
         thresholds.push(threshold)
         for (const configured of configuredKeys) {
@@ -155,7 +158,7 @@ export async function reportModelLimitMiss(
     messages: WithParts[],
 ): Promise<void> {
     const { providerId, modelId } = getModelInfo(messages)
-    const miss = detectModelLimitMiss(config, providerId, modelId)
+    const miss = detectModelLimitMiss(config, providerId, modelId, state.modelContextLimit)
     if (!miss) {
         return
     }
@@ -168,8 +171,8 @@ export async function reportModelLimitMiss(
 
     const tables = miss.thresholds.map((t) => (t === "max" ? "modelMaxLimits" : "modelMinLimits"))
     const lines = [
-        `${miss.key} 未配置 ${tables.join(" / ")}，已回落到全局触发线（50k 劝说 / 100k 强制）。`,
-        "若该模型上下文 ≥500k，会在 100k 被紧急档反复压缩——请在 ~/.redcode/dcp.jsonc 两张表补键。每个新会话都会提醒一次，补键后消失。",
+        `${miss.key} 未配置 ${tables.join(" / ")}，已回落到全局触发线（${config.compress.minContextLimit} 劝说 / ${config.compress.maxContextLimit} 强制）。`,
+        "若该模型上下文 ≥500k，过早回落会缩小可用窗口——请在 ~/.redcode/dcp.jsonc 两张表补键。每个新会话都会提醒一次，补键后消失。",
     ]
     if (miss.sameModelKeys.length > 0) {
         lines.push(`同名模型已配置的键：${miss.sameModelKeys.join(", ")}`)

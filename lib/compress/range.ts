@@ -24,6 +24,7 @@ import {
     wrapCompressedSummary,
 } from "./state"
 import type { CompressRangeToolArgs } from "./types"
+import { buildWorkingState, formatWorkingState } from "./working-state"
 import { formatCompressionOutcome } from "./outcome"
 import {
     checkRecoveryBudget,
@@ -100,6 +101,7 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                 anchorMessageId: string
                 finalSummary: string
                 consumedBlockIds: number[]
+                workingState: ReturnType<typeof buildWorkingState>
             }> = []
             let totalCompressedMessages = 0
 
@@ -155,12 +157,19 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                     injected.consumedBlockIds,
                 )
 
+                // 260928 Red workingState 快照：append 进 summary 随块注入，结构化字段落块元数据。
+                const workingState = buildWorkingState(ctx.state, plan.selection, rawMessages)
+                const finalSummary = workingState
+                    ? `${completedSummary.expandedSummary}\n\n${formatWorkingState(workingState)}`
+                    : completedSummary.expandedSummary
+
                 preparedPlans.push({
                     entry: plan.entry,
                     selection: plan.selection,
                     anchorMessageId: plan.anchorMessageId,
-                    finalSummary: completedSummary.expandedSummary,
+                    finalSummary,
                     consumedBlockIds: completedSummary.consumedBlockIds,
+                    workingState,
                 })
             }
 
@@ -256,6 +265,7 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                         compressMessageId: toolCtx.messageID,
                         compressCallId: callId,
                         summaryTokens,
+                        workingState: preparedPlan.workingState,
                     },
                     preparedPlan.selection,
                     preparedPlan.anchorMessageId,

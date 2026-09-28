@@ -30,6 +30,21 @@ export interface PrunedMessageEntry {
 
 export type CompressionMode = "range" | "message"
 
+export interface WorkingStateFailedCall {
+    tool: string
+    input: string
+    error: string
+}
+
+// 260928 Red 压缩块的结构化工作状态：从 toolParameters 与消息机械提取，不经模型。
+// 渲染文本随块 summary 注入（模型可见），结构化字段供 decompress/审计使用。
+// 注入面有硬上限（见 compress/working-state.ts 的预算裁剪），旧块无此字段兼容。
+export interface WorkingState {
+    filesTouched: string[]
+    failedCalls: WorkingStateFailedCall[]
+    userPrompts: string[]
+}
+
 export interface CompressionBlock {
     blockId: number
     runId: number
@@ -57,6 +72,7 @@ export interface CompressionBlock {
     deactivatedAt?: number
     deactivatedByBlockId?: number
     summary: string
+    workingState?: WorkingState
 }
 
 export interface PruneMessagesState {

@@ -8,6 +8,7 @@ import type {
 import { isIgnoredUserMessage, messageHasCompress } from "../messages/query"
 import { isMessageWithInfo } from "../messages/shape"
 import { countTokens } from "../token-utils"
+import { parseWorkingState } from "../compress/working-state"
 
 export const isMessageCompacted = (state: SessionState, msg: WithParts): boolean => {
     if (!isMessageWithInfo(msg)) {
@@ -258,6 +259,7 @@ export function loadPruneMessagesState(
                         ? block.deactivatedByBlockId
                         : undefined,
                 summary: typeof block.summary === "string" ? block.summary : "",
+                workingState: parseWorkingState(block.workingState),
             })
         }
     }

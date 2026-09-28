@@ -1,7 +1,7 @@
 import type { PluginConfig } from "../config"
 import type { Logger } from "../logger"
 import type { PromptStore } from "../prompts/store"
-import type { CompressionBlock, CompressionMode, SessionState, WithParts } from "../state"
+import type { CompressionBlock, CompressionMode, SessionState, WithParts, WorkingState } from "../state"
 
 export interface ToolContext {
     client: any
@@ -105,4 +105,5 @@ export interface CompressionStateInput {
     compressMessageId: string
     compressCallId?: string
     summaryTokens: number
+    workingState?: WorkingState
 }

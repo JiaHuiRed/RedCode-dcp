@@ -134,6 +134,7 @@ export function applyCompressionState(
         effectiveToolIds: [...effectiveToolIds],
         createdAt,
         summary,
+        workingState: input.workingState,
     }
 
     messagesState.blocksById.set(blockId, block)

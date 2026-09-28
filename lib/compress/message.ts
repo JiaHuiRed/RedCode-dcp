@@ -6,6 +6,7 @@ import { formatIssues, formatResult, resolveMessages, validateArgs } from "./mes
 import { finalizeSession, prepareSession, type NotificationEntry } from "./pipeline"
 import { formatCompressionOutcome } from "./outcome"
 import { appendProtectedPromptInfo, appendProtectedTools } from "./protected-content"
+import { buildWorkingState, formatWorkingState } from "./working-state"
 import {
     allocateBlockId,
     allocateRunId,
@@ -78,6 +79,7 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
             const preparedPlans: Array<{
                 plan: (typeof plans)[number]
                 summaryWithTools: string
+                workingState: ReturnType<typeof buildWorkingState>
             }> = []
 
             for (const plan of plans) {
@@ -89,7 +91,7 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
                     ctx.config.compress.protectTags,
                 )
 
-                const summaryWithTools = await appendProtectedTools(
+                const summaryWithToolsRaw = await appendProtectedTools(
                     ctx.client,
                     ctx.state,
                     ctx.config.experimental.allowSubAgents,
@@ -100,9 +102,17 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
                     ctx.config.protectedFilePatterns,
                 )
 
+                // 260928 Red workingState 快照：append 进 summary 随块注入（filterCompressedRanges
+                // 把 block.summary 全文回注），结构化字段经 CompressionStateInput 落进块元数据。
+                const workingState = buildWorkingState(ctx.state, plan.selection, rawMessages)
+                const summaryWithTools = workingState
+                    ? `${summaryWithToolsRaw}\n\n${formatWorkingState(workingState)}`
+                    : summaryWithToolsRaw
+
                 preparedPlans.push({
                     plan,
                     summaryWithTools,
+                    workingState,
                 })
             }
 
@@ -133,7 +143,7 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
             let totalCompressedTokens = 0
             let totalSummaryTokens = 0
 
-            for (const { plan, summaryWithTools } of preparedPlans) {
+            for (const { plan, summaryWithTools, workingState } of preparedPlans) {
                 const blockId = allocateBlockId(ctx.state)
                 const storedSummary = wrapCompressedSummary(blockId, summaryWithTools)
                 const summaryTokens = countTokens(storedSummary)
@@ -150,6 +160,7 @@ export function createCompressMessageTool(ctx: ToolContext): ReturnType<typeof t
                         compressMessageId: toolCtx.messageID,
                         compressCallId: callId,
                         summaryTokens,
+                        workingState,
                     },
                     plan.selection,
                     plan.anchorMessageId,

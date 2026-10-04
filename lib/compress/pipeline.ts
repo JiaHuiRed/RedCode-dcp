@@ -18,7 +18,7 @@ interface RunContext {
         always: string[]
         metadata: Record<string, unknown>
     }): Promise<void>
-    metadata(input: { title: string }): void
+    metadata(input: { title?: string; metadata?: Record<string, unknown> }): void
     sessionID: string
 }
 
@@ -113,4 +113,41 @@ export async function finalizeSession(
         sessionMessageIds,
         params,
     )
+
+    // 261004 Red 只附加数字回执；摘要、工具返回文本与触发策略保持原样。
+    if (entries.length === 0) return
+    const blocks = entries.map((entry) => ctx.state.prune.messages.blocksById.get(entry.blockId))
+    if (blocks.some((block) => !block)) {
+        ctx.logger.warn("Compression evidence unavailable: completed block missing", {
+            sessionId: toolCtx.sessionID,
+        })
+        return
+    }
+    const completed = blocks.filter((block) => block !== undefined)
+    const created = new Set(completed.map((block) => block.blockId))
+    const consumed = [...new Set(completed.flatMap((block) => block.consumedBlockIds))]
+        .filter((id) => !created.has(id))
+        .map((id) => ctx.state.prune.messages.blocksById.get(id))
+    if (consumed.some((block) => !block)) {
+        ctx.logger.warn("Compression evidence unavailable: consumed block missing", {
+            sessionId: toolCtx.sessionID,
+        })
+        return
+    }
+    const inputTokensEstimated =
+        completed.reduce((sum, block) => sum + block.compressedTokens, 0) +
+        consumed.reduce((sum, block) => sum + (block?.summaryTokens ?? 0), 0)
+    const summaryTokensEstimated = completed.reduce((sum, block) => sum + block.summaryTokens, 0)
+    toolCtx.metadata({
+        metadata: {
+            dcpCompression: {
+                version: 1,
+                runId: entries[0]!.runId,
+                blockCount: completed.length,
+                inputTokensEstimated,
+                summaryTokensEstimated,
+                netSavingsEstimated: inputTokensEstimated - summaryTokensEstimated,
+            },
+        },
+    })
 }

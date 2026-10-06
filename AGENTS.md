@@ -4,13 +4,15 @@
 
 ## 验证命令（从仓库根跑）
 
-- `bun run typecheck` — tsc --noEmit
-- `bun test` — 全量 21 个测试文件。已知基线失败：`prompts.test.ts` 的 "system prompt overrides handle reminder tags safely"（260921 确认改动前即挂，与本仓常规改动无关；修它是另一回事）
+- `rebuild.bat` — pull 后的一条命令：报本地落后多少 → clean+tsup+声明 → 校验 `dist` 产物并打印「重启会话」提醒（检测到还活着的 opencode/bun 进程会点名）。子命令：`pull`（仅工作区干净时 `--ff-only`，绝不 stash）/ `typecheck` / `test` / `all`。
+  脚本必须保持**纯 ASCII**：cmd 按字符数定位多字节 .bat 会偏到半行继续执行（实测把 `echo` 尾巴当命令跑）；中文说明写这里，不写进脚本。
 - `npm run build` — clean + tsup + tsc --emitDeclarationOnly → `dist/index.js`（dist 不入库）
+- `bun run typecheck` — tsc --noEmit
+- `npm test` — node --test，24 个测试文件，**149/149 全绿**（06 号实测）。别用 `bun test`：bun 1.3.14 不支持 `node:test` 嵌套子测试，`prompts.test.ts` 的 "system prompt overrides handle reminder tags safely" 会抛 NotImplementedError 假挂（260921 记录的「已知基线失败」就是这个 runner 坑，不是代码问题），而且它只数到 146 个测试。
 
 ## 本仓红线
 
-- **改码必 `npm run build` + 重启会话**。loader 动态 import `dist/index.js`，只改源码不重建 = 白改（260826 实证）。
+- **改码必 `npm run build` + 重启会话**。loader 动态 import `dist/index.js`，只改源码不重建 = 白改（260826 实证）。`rebuild.bat` 已经把「编译 + 产物核对 + 点名还活着的进程」合成一条命令，别手敲三步。
 - **dcp.jsonc 两张触发线表必须成对补**：`modelMinLimits` / `modelMaxLimits`，detectModelLimitMiss 是逐表判的，漏一张照样告警回落。校验规则：`max < context` 且 `min < 80% context`。
 - **新 provider / 新模型接入必回来补键**。判据：contextWindow ≥ 500k 的模型两张表必须有键（小窗口模型配大线反而让紧急档永不触发）。缺键静默回落全局默认 50k/100k——此坑五犯（260811/260902/260904/260910/260921），已有每会话告警门禁（warnedModelLimitKeys），补键仍是唯一根治。
 - **per-session 状态挂 SessionState**：`createSessionState` 初始化、`resetSessionState` 重置成对写；禁止模块级可变状态做去重——进程级去重让告警每进程只响一次，是五犯间隔那么长的帮凶（0059401）。

@@ -1,5 +1,6 @@
 import type { SessionState } from "../state"
 import { countTokens } from "../token-utils"
+import { restoreSummary } from "./range-utils"
 import type { SelectionResolution } from "./types"
 
 /**
@@ -14,9 +15,10 @@ import type { SelectionResolution } from "./types"
  * 1. 摘要不比它替换掉的内容小 —— 定义上就不该做。
  * 2. 选中范围本身太小 —— 即使摘要更小，为了几百 token 打掉整条前缀缓存也不划算。
  *
- * ⚠️ **只在紧急档恢复期间生效**（`state.nudges.recovering`）。手动压缩、收益档压缩都不拦：
- * 用户明说要压一小段是他的决定，收益档压单条消息几百 token 也是那个模式的既定粒度。
- * 要拦的是"被提醒逼着交差"这一种，而它只在恢复期间发生。
+ * ⚠️ 「选得太小」只在紧急档恢复期间生效（`state.nudges.recovering`）：手动压缩、
+ * 收益档压缩都不拦——用户明说要压一小段是他的决定，收益档压单条消息几百 token
+ * 也是那个模式的既定粒度。要拦的是"被提醒逼着交差"这一种。
+ * （260107 起「摘要比替换内容大」的净增判据改为全模式生效，理由见 checkViability。）
  */
 const MIN_SELECTION_TOKENS = 1000
 
@@ -57,6 +59,25 @@ export function estimateNewlyCompressedTokens(
 }
 
 /**
+ * 260107 Red: 本次压缩从**当前上下文**里实际移走并替换掉的文本量——
+ * 新压缩消息的现算值 + 被折叠旧块的注入文本（restoreSummary 后的摘要正文，
+ * 上下文里放的正是这些）。
+ *
+ * 为什么需要单独的口径：重压旧块时 `estimateNewlyCompressedTokens` 只数新增
+ * 消息，被折叠掉的旧块摘要一行都不算。实测一次折叠 25 个旧块的压缩把 41.9 万
+ * 字符摘要落进上下文（比它替换掉的旧块文本还大，净增），却因为只看新消息而
+ * 全模式放行；旧块的原始消息早已不在上下文里，数它们没有意义。
+ */
+export function estimateReplacedTokens(state: SessionState, selection: SelectionResolution): number {
+    let total = estimateNewlyCompressedTokens(state, selection)
+    for (const blockId of new Set(selection.requiredBlockIds)) {
+        const block = state.prune.messages.blocksById.get(blockId)
+        if (block) total += countTokens(restoreSummary(block.summary))
+    }
+    return total
+}
+
+/**
  * `enforceMinimum` 只对 range 模式开。
  *
  * message 模式一个 plan 就是**一条消息**，几百 token 是它的既定粒度，套 1000 的下限
@@ -70,19 +91,30 @@ export function checkViability(
     summary: string,
     options?: { enforceMinimum?: boolean; summaryTokens?: number },
 ): ViabilityFailure | undefined {
+    const replacedTokens = estimateReplacedTokens(state, selection)
+    const summaryTokens = options?.summaryTokens ?? countTokens(summary)
+
+    // 260107 Red: 「摘要不比它替换的内容小」是定义级判据，任何模式都拦。
+    // 旧实现只在恢复档检查、且口径只数新消息——一次非恢复档的历史折叠就这样
+    // 净增放行（b28：140K 摘要替换不到 95K 文本，还打掉了整条前缀缓存）。
     if (!state.nudges.recovering) {
+        // 260107 Red: 折叠旧块的二次压缩在任何模式都做净增核算——b28 就是非恢复档
+        // 折叠 25 个旧块净增放行的。纯新消息的压缩保持原边界：手动/收益档由提交方
+        // 自负（摘要略大于一条小消息是那个模式的既定粒度），不额外拦。
+        if (selection.requiredBlockIds.length > 0 && summaryTokens >= replacedTokens) {
+            return { startId, endId, selectionTokens: replacedTokens, summaryTokens, reason: "no-saving" }
+        }
         return undefined
     }
 
-    const selectionTokens = estimateNewlyCompressedTokens(state, selection)
-    const summaryTokens = options?.summaryTokens ?? countTokens(summary)
-
-    if (options?.enforceMinimum !== false && selectionTokens < MIN_SELECTION_TOKENS) {
-        return { startId, endId, selectionTokens, summaryTokens, reason: "too-small" }
+    // 恢复档的「选得太小」按实际替换量判：只折叠旧块的二次压缩（新消息为 0）
+    // 同样是一次真实的替换，不该因为新消息少被误判成交差。
+    if (options?.enforceMinimum !== false && replacedTokens < MIN_SELECTION_TOKENS) {
+        return { startId, endId, selectionTokens: replacedTokens, summaryTokens, reason: "too-small" }
     }
 
-    if (summaryTokens >= selectionTokens) {
-        return { startId, endId, selectionTokens, summaryTokens, reason: "no-saving" }
+    if (summaryTokens >= replacedTokens) {
+        return { startId, endId, selectionTokens: replacedTokens, summaryTokens, reason: "no-saving" }
     }
 
     return undefined

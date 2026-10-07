@@ -6,7 +6,7 @@ import {
     estimateNewlyCompressedTokens,
 } from "../lib/compress/viability"
 import { createSessionState } from "../lib/state"
-import type { SessionState } from "../lib/state"
+import type { CompressionBlock, SessionState } from "../lib/state"
 import type { SelectionResolution } from "../lib/compress/types"
 
 // 260903 cc: 两个形状都取自实测 ses_ffe5f9fca1（一个会话压了 9 次）：
@@ -107,8 +107,9 @@ test("keeps the old strict behaviour when the compressible cap is not supplied",
     assert.equal(failure.requiredNetSavings, 100_000)
 })
 
-test("does not gate outside emergency recovery", () => {
-    // 手动压一小段、收益档压单条消息都不该被拦——要拦的是被提醒逼着交差那一种
+test("outside recovery, plain compressions keep the old boundary but folded blocks are checked", () => {
+    // 纯新消息的手动/收益档压缩保持原边界（要拦的是被提醒逼着交差那一种）；
+    // 260107 起折叠旧块的二次压缩在任何模式都做净增核算
     const state = createSessionState()
     assert.equal(state.nudges.recovering, false)
     const selection = buildSelection({ m1: 20 })
@@ -130,4 +131,42 @@ test("already-compressed messages contribute no new saving", () => {
     const failure = checkViability(state, "m0001", "m0009", selection, summaryOf(100))
     assert.ok(failure)
     assert.equal(failure.reason, "too-small")
+})
+
+// 260107 Red: b28 形状——把一批旧块折叠成一个更大的摘要，在任何模式下都是净增，必须拦。
+// 旧实现在非恢复档完全不检查，且恢复档口径只数新消息，这类压缩两次都漏网。
+test("stops a net-negative re-compression of old blocks outside recovery (b28 shape)", () => {
+    const state = createSessionState()
+    assert.equal(state.nudges.recovering, false)
+    // 旧块 1 的注入文本（restoreSummary 后）约 5000 token
+    state.prune.messages.blocksById.set(1, { summary: "x ".repeat(10_000) } as unknown as CompressionBlock)
+    const selection = buildSelection({})
+    selection.requiredBlockIds = [1]
+
+    const failure = checkViability(state, "b1", "b1", selection, summaryOf(8_000))
+    assert.ok(failure)
+    assert.equal(failure.reason, "no-saving")
+})
+
+test("accepts a well-condensed fold of old blocks", () => {
+    const state = createSessionState()
+    state.prune.messages.blocksById.set(1, { summary: "x ".repeat(10_000) } as unknown as CompressionBlock)
+    const selection = buildSelection({})
+    selection.requiredBlockIds = [1]
+
+    assert.equal(checkViability(state, "b1", "b1", selection, summaryOf(1_000)), undefined)
+})
+
+test("recovery measures folded old-block text, not just new messages", () => {
+    const state = recoveringState()
+    state.prune.messages.blocksById.set(1, { summary: "x ".repeat(10_000) } as unknown as CompressionBlock)
+    const selection = buildSelection({ m2: 3_000 })
+    selection.requiredBlockIds = [1]
+
+    // 被替换 = 新消息 3000 + 旧块注入约 5000；摘要写到 20000 是净增，拦
+    const failure = checkViability(state, "b1", "m2", selection, summaryOf(20_000))
+    assert.ok(failure)
+    assert.equal(failure.reason, "no-saving")
+    // 同样范围写紧凑摘要就是真实的二次压缩，放行
+    assert.equal(checkViability(state, "b1", "m2", selection, summaryOf(2_000)), undefined)
 })

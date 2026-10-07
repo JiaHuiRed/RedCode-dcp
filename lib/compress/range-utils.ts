@@ -269,7 +269,7 @@ export function appendMissingBlockSummaries(
     }
 }
 
-function restoreSummary(summary: string): string {
+export function restoreSummary(summary: string): string {
     const headerMatch = summary.match(/^\s*\[Compressed conversation(?: section)?(?: b\d+)?\]/i)
     if (!headerMatch) {
         return summary

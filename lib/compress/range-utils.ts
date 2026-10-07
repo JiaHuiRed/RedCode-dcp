@@ -48,6 +48,7 @@ export function resolveRanges(
             startId: entry.startId.trim(),
             endId: entry.endId.trim(),
             summary: entry.summary,
+            condensedSummaries: entry.condensedSummaries,
         }
 
         const { startReference, endReference } = resolveBoundaryIds(
@@ -173,6 +174,7 @@ export function injectBlockPlaceholders(
     summaryByBlockId: Map<number, CompressionBlock>,
     startReference: BoundaryReference,
     endReference: BoundaryReference,
+    condensed: ReadonlyMap<number, string> = new Map(),
 ): InjectedSummaryResult {
     let cursor = 0
     let expanded = summary
@@ -188,7 +190,7 @@ export function injectBlockPlaceholders(
             }
 
             expanded += summary.slice(cursor, placeholder.startIndex)
-            expanded += restoreSummary(target.summary)
+            expanded += condensed.get(target.blockId) ?? restoreSummary(target.summary)
             cursor = placeholder.endIndex
 
             if (!consumedSeen.has(placeholder.blockId)) {
@@ -207,6 +209,7 @@ export function injectBlockPlaceholders(
         summaryByBlockId,
         consumed,
         consumedSeen,
+        condensed,
     )
     expanded = injectBoundarySummary(
         expanded,
@@ -215,6 +218,7 @@ export function injectBlockPlaceholders(
         summaryByBlockId,
         consumed,
         consumedSeen,
+        condensed,
     )
 
     return {
@@ -228,6 +232,7 @@ export function appendMissingBlockSummaries(
     missingBlockIds: number[],
     summaryByBlockId: Map<number, CompressionBlock>,
     consumedBlockIds: number[],
+    condensed: ReadonlyMap<number, string> = new Map(),
 ): InjectedSummaryResult {
     const consumedSeen = new Set<number>(consumedBlockIds)
     const consumed = [...consumedBlockIds]
@@ -243,7 +248,7 @@ export function appendMissingBlockSummaries(
             throw new Error(`Compressed block not found: (b${blockId})`)
         }
 
-        missingSummaries.push(`\n### (b${blockId})\n${restoreSummary(target.summary)}`)
+        missingSummaries.push(`\n### (b${blockId})\n${condensed.get(blockId) ?? restoreSummary(target.summary)}`)
         consumedSeen.add(blockId)
         consumed.push(blockId)
     }
@@ -284,6 +289,7 @@ function injectBoundarySummary(
     summaryByBlockId: Map<number, CompressionBlock>,
     consumed: number[],
     consumedSeen: Set<number>,
+    condensed: ReadonlyMap<number, string>,
 ): string {
     if (reference.kind !== "compressed-block" || reference.blockId === undefined) {
         return summary
@@ -297,7 +303,7 @@ function injectBoundarySummary(
         throw new Error(`Compressed block not found: (b${reference.blockId})`)
     }
 
-    const injectedBody = restoreSummary(target.summary)
+    const injectedBody = condensed.get(target.blockId) ?? restoreSummary(target.summary)
     const left = position === "start" ? injectedBody.trim() : summary.trim()
     const right = position === "start" ? summary.trim() : injectedBody.trim()
     const next = !left ? right : !right ? left : `${left}\n\n${right}`
@@ -305,4 +311,41 @@ function injectBoundarySummary(
     consumedSeen.add(reference.blockId)
     consumed.push(reference.blockId)
     return next
+}
+
+const protectedHeadings = [
+    "The following user messages were sent in this conversation verbatim:",
+    "The following protected prompt information was included in this conversation verbatim:",
+    "The following protected tools were used in this conversation as well:",
+]
+
+export function protectedTail(summary: string): string | undefined {
+    const body = restoreSummary(summary)
+    const positions = protectedHeadings.map((heading) => body.indexOf(heading)).filter((index) => index >= 0)
+    return positions.length ? body.slice(Math.min(...positions)) : undefined
+}
+
+// 261007 Red 旧块无保护来源标记时保守回填全文；保护内容绝不交给模型二次概括。
+export function resolveCondensedSummaries(
+    overrides: Record<string, string> | undefined,
+    required: number[],
+    blocks: Map<number, CompressionBlock>,
+    maxChars: number,
+): Map<number, string> {
+    const result = new Map<number, string>()
+    if (overrides === undefined) return result
+    if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) throw new Error("condensedSummaries must be an object")
+    for (const [ref, text] of Object.entries(overrides)) {
+        const id = /^b[1-9]\d*$/.test(ref) ? Number(ref.slice(1)) : NaN
+        const block = blocks.get(id)
+        if (!block || !required.includes(id)) throw new Error(`Condensed block is not selected: ${ref}`)
+        if (typeof text !== "string" || !text.trim() || text.length > maxChars) throw new Error(`Invalid condensed summary: ${ref}`)
+        if (parseBlockPlaceholders(text).length) throw new Error("Condensed summaries must be self-contained without block placeholders")
+        const tail = protectedTail(block.summary)
+        const body = tail !== undefined
+            ? `${text.trim()}\n\n${tail}`
+            : block.protectedContentKnown === true ? text.trim() : restoreSummary(block.summary)
+        result.set(id, body)
+    }
+    return result
 }

@@ -260,6 +260,7 @@ export function loadPruneMessagesState(
                         : undefined,
                 summary: typeof block.summary === "string" ? block.summary : "",
                 workingState: parseWorkingState(block.workingState),
+                protectedContentKnown: typeof block.protectedContentKnown === "boolean" ? block.protectedContentKnown : undefined,
             })
         }
     }

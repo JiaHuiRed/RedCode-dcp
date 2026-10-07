@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import type { ToolContext } from "./types"
 import { countTokens } from "../token-utils"
+import { resolveContextConfig } from "../context-config"
 import { finalizeSession, prepareSession, type NotificationEntry } from "./pipeline"
 import {
     appendProtectedPromptInfo,
@@ -15,6 +16,8 @@ import {
     validateArgs,
     validateNonOverlapping,
     validateSummaryPlaceholders,
+    resolveCondensedSummaries,
+    protectedTail,
 } from "./range-utils"
 import {
     COMPRESSED_BLOCK_HEADER,
@@ -40,7 +43,7 @@ import {
 } from "../messages/inject/utils"
 import { getCurrentTokenUsage } from "../token-utils"
 
-function buildSchema(runtimePrompts: string) {
+function buildSchema(runtimePrompts: string, maxChars: number) {
     return {
         topic: tool.schema
             .string()
@@ -57,6 +60,9 @@ function buildSchema(runtimePrompts: string) {
                         .string()
                         .describe("Message or block ID marking the end of range (e.g. m0012, b5)"),
                     summary: tool.schema.string().describe(runtimePrompts),
+                    condensedSummaries: tool.schema.record(tool.schema.string().max(32), tool.schema.string().min(1).max(maxChars)).optional().describe(
+                        "Optional bN-to-shorter-summary map for selected old blocks. Protected verbatim content is retained and originals remain archived. Use dcp_read to recover details.",
+                    ),
                 }),
             )
             .describe(
@@ -74,10 +80,11 @@ const RANGE_DESCRIPTION =
 export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof tool> {
     ctx.prompts.reload()
     const runtimePrompts = ctx.prompts.getRuntimePrompts()
+    const limits = resolveContextConfig(ctx.config.compress.contextManagement)
 
     return tool({
         description: RANGE_DESCRIPTION,
-        args: buildSchema(runtimePrompts.compressRange),
+        args: buildSchema(runtimePrompts.compressRange, limits.maxCondensedSummaryChars),
         async execute(args, toolCtx) {
             const input = args as CompressRangeToolArgs
             validateArgs(input)
@@ -106,6 +113,12 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
             let totalCompressedMessages = 0
 
             for (const plan of resolvedPlans) {
+                const condensed = resolveCondensedSummaries(
+                    plan.entry.condensedSummaries,
+                    plan.selection.requiredBlockIds,
+                    searchContext.summaryByBlockId,
+                    limits.maxCondensedSummaryChars,
+                )
                 const parsedPlaceholders = parseBlockPlaceholders(plan.entry.summary)
                 const missingBlockIds = validateSummaryPlaceholders(
                     parsedPlaceholders,
@@ -121,6 +134,7 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                     searchContext.summaryByBlockId,
                     plan.selection.startReference,
                     plan.selection.endReference,
+                    condensed,
                 )
 
                 const summaryWithUsers = appendProtectedUserMessages(
@@ -155,6 +169,7 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                     missingBlockIds,
                     searchContext.summaryByBlockId,
                     injected.consumedBlockIds,
+                    condensed,
                 )
 
                 // 260928 Red workingState 快照：append 进 summary 随块注入，结构化字段落块元数据。
@@ -266,6 +281,10 @@ export function createCompressRangeTool(ctx: ToolContext): ReturnType<typeof too
                         compressCallId: callId,
                         summaryTokens,
                         workingState: preparedPlan.workingState,
+                        protectedContentKnown: preparedPlan.consumedBlockIds.every((id) => {
+                            const child = searchContext.summaryByBlockId.get(id)
+                            return child !== undefined && (child.protectedContentKnown === true || protectedTail(child.summary) !== undefined)
+                        }),
                     },
                     preparedPlan.selection,
                     preparedPlan.anchorMessageId,

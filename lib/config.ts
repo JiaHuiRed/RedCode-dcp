@@ -3,6 +3,7 @@ import { join, dirname } from "path"
 import { homedir } from "os"
 import { parse } from "jsonc-parser/lib/esm/main.js"
 import type { PluginInput } from "@opencode-ai/plugin"
+import { resolveContextConfig, type ContextConfigInput } from "./context-config"
 
 type Permission = "ask" | "allow" | "deny"
 type CompressMode = "range" | "message"
@@ -13,6 +14,7 @@ export interface Deduplication {
 }
 
 export interface CompressConfig {
+    contextManagement?: ContextConfigInput
     mode: CompressMode
     permission: Permission
     showCompression: boolean
@@ -83,6 +85,7 @@ const DEFAULT_PROTECTED_TOOLS = [
     "todowrite",
     "todoread",
     "compress",
+    "compress.contextManagement",
     "batch",
     "plan_enter",
     "plan_exit",
@@ -147,7 +150,7 @@ function getConfigKeyPaths(obj: Record<string, any>, prefix = ""): string[] {
         keys.push(fullKey)
 
         // model*Limits are dynamic maps keyed by providerID/modelID; do not recurse into arbitrary IDs.
-        if (fullKey === "compress.modelMaxLimits" || fullKey === "compress.modelMinLimits") {
+        if (fullKey === "compress.modelMaxLimits" || fullKey === "compress.modelMinLimits" || fullKey === "compress.contextManagement") {
             continue
         }
 
@@ -491,6 +494,18 @@ export function validateConfigTypes(config: Record<string, any>): ValidationErro
                 })
             }
 
+            if (compress.contextManagement !== undefined) {
+                try {
+                    resolveContextConfig(compress.contextManagement)
+                } catch (error) {
+                    errors.push({
+                        key: "compress.contextManagement",
+                        expected: "validated bounded context management options",
+                        actual: error instanceof Error ? error.message : "invalid options",
+                    })
+                }
+            }
+
             if (
                 typeof compress.iterationNudgeThreshold === "number" &&
                 compress.iterationNudgeThreshold < 1
@@ -788,6 +803,7 @@ const defaultConfig: PluginConfig = {
         protectedTools: [...COMPRESS_DEFAULT_PROTECTED_TOOLS],
         protectTags: false,
         protectUserMessages: false,
+        contextManagement: resolveContextConfig(),
     },
     strategies: {
         deduplication: {
@@ -956,6 +972,11 @@ function mergeCompress(
         protectedTools: [...new Set([...base.protectedTools, ...(override.protectedTools ?? [])])],
         protectTags: override.protectTags ?? base.protectTags,
         protectUserMessages: override.protectUserMessages ?? base.protectUserMessages,
+        contextManagement: resolveContextConfig({
+            ...base.contextManagement,
+            ...override.contextManagement,
+            rates: { ...base.contextManagement?.rates, ...override.contextManagement?.rates },
+        }),
     }
 }
 

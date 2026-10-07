@@ -10,6 +10,7 @@ import { formatTokenCount } from "../ui/utils"
 import { loadAllSessionStats, type AggregatedStats } from "../state/persistence"
 import { getCurrentParams } from "../token-utils"
 import { getActiveCompressionTargets } from "./compression-targets"
+import { formatEconomics } from "../compression-economics"
 
 export interface StatsCommandContext {
     client: any
@@ -100,7 +101,7 @@ export async function handleStatsCommand(ctx: StatsCommandContext): Promise<void
         report.sessionMessages,
         report.sessionDurationMs,
         report.allTime,
-    )
+    ) + formatEconomics(state)
 
     const params = getCurrentParams(state, messages, logger)
     await sendIgnoredMessage(client, sessionId, message, params, logger)

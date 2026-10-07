@@ -4,6 +4,7 @@ import { createCompressMessageTool, createCompressRangeTool } from "./lib/compre
 import {
     compressDisabledByOpencode,
     hasExplicitToolPermission,
+    hasMatchingToolPermission,
     type HostPermissionSnapshot,
 } from "./lib/host-permissions"
 import { Logger } from "./lib/logger"
@@ -18,6 +19,7 @@ import {
 } from "./lib/hooks"
 import { configureClientAuth, isSecureMode } from "./lib/auth"
 import { startAutoUpdate } from "./lib/update"
+import { createRetrievalTools } from "./lib/context-retrieval"
 
 const server: Plugin = (async (ctx) => {
     const config = getConfig(ctx)
@@ -79,6 +81,7 @@ const server: Plugin = (async (ctx) => {
         ),
         event: createEventHandler(state, logger),
         tool: {
+            ...(config.compress.permission !== "deny" && createRetrievalTools(compressToolContext, hostPermissions)),
             ...(config.compress.permission !== "deny" && {
                 compress:
                     config.compress.mode === "message"
@@ -104,7 +107,7 @@ const server: Plugin = (async (ctx) => {
 
             const toolsToAdd: string[] = []
             if (config.compress.permission !== "deny" && !config.experimental.allowSubAgents) {
-                toolsToAdd.push("compress")
+                toolsToAdd.push("compress", "dcp_search", "dcp_read")
             }
 
             if (toolsToAdd.length > 0) {
@@ -123,6 +126,12 @@ const server: Plugin = (async (ctx) => {
                 } as typeof permission
             }
 
+            for (const name of ["dcp_search", "dcp_read"]) {
+                if (!hasMatchingToolPermission(opencodeConfig.permission, name)) {
+                    const permission = opencodeConfig.permission ?? {}
+                    opencodeConfig.permission = { ...permission, [name]: config.compress.permission } as typeof permission
+                }
+            }
             hostPermissions.global = opencodeConfig.permission
             hostPermissions.agents = Object.fromEntries(
                 Object.entries(opencodeConfig.agent ?? {}).map(([name, agent]) => [

@@ -11,6 +11,7 @@ import { join } from "path"
 import type { CompressionBlock, PrunedMessageEntry, SessionState, SessionStats } from "./types"
 import type { Logger } from "../logger"
 import { serializePruneMessagesState } from "./utils"
+import type { EconomicsState } from "../compression-economics"
 
 /** Prune state as stored on disk */
 export interface PersistedPruneMessagesState {
@@ -37,6 +38,7 @@ export interface PersistedNudges {
 }
 
 export interface PersistedSessionState {
+    economics?: EconomicsState
     sessionName?: string
     manualMode?: boolean
     prune: PersistedPrune
@@ -105,6 +107,7 @@ export async function saveSessionState(
                 absoluteNudgeAnchors: Array.from(sessionState.nudges.absoluteNudgeAnchors),
             },
             stats: sessionState.stats,
+            economics: sessionState.economics,
             lastUpdated: new Date().toISOString(),
         }
 

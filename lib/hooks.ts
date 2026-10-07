@@ -1,6 +1,8 @@
 import type { SessionState, WithParts } from "./state"
 import type { Logger } from "./logger"
 import type { PluginConfig } from "./config"
+import { syncEconomics } from "./compression-economics"
+import { resolveContextConfig } from "./context-config"
 import { assignMessageRefs } from "./message-ids"
 import {
     buildPriorityMap,
@@ -126,6 +128,9 @@ export function createChatMessageTransformHandler(
         await checkSession(client, state, logger, output.messages, config.manualMode.enabled)
 
         syncCompressPermissionState(state, config, hostPermissions, output.messages)
+        if (syncEconomics(state, output.messages, resolveContextConfig(config.compress.contextManagement)) && state.economics?.entries.length) {
+            await saveSessionState(state, logger)
+        }
 
         if (state.isSubAgent && !config.experimental.allowSubAgents) {
             return

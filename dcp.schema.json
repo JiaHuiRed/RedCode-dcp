@@ -134,6 +134,39 @@
             "description": "Configuration for the unified compress tool",
             "additionalProperties": false,
             "properties": {
+                "contextManagement": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "Bounds for archived-context retrieval, opt-in summary condensation, and the compression economics ledger. Monetary rates are optional estimates per million tokens, not subscription quota.",
+                    "properties": {
+                        "maxCondensedSummaryChars": { "type": "integer", "minimum": 1, "maximum": 65536, "default": 8192 },
+                        "maxOutputBytes": { "type": "integer", "minimum": 512, "maximum": 65536, "default": 8192 },
+                        "maxOutputTokens": { "type": "integer", "minimum": 128, "maximum": 16384, "default": 2048 },
+                        "maxQueryChars": { "type": "integer", "minimum": 1, "maximum": 1024, "default": 256 },
+                        "maxResults": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
+                        "maxScanBytes": { "type": "integer", "minimum": 1024, "maximum": 8388608, "default": 1048576 },
+                        "ledgerMaxEntries": { "type": "integer", "minimum": 1, "maximum": 1024, "default": 128 },
+                        "rates": {
+                            "type": "object",
+                            "maxProperties": 128,
+                            "propertyNames": { "minLength": 1, "maxLength": 256 },
+                            "default": {},
+                            "additionalProperties": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": ["currency", "input", "cacheRead", "cacheWrite", "output", "reasoning"],
+                                "properties": {
+                                    "currency": { "type": "string", "pattern": "^[A-Z]{3,8}$" },
+                                    "input": { "type": "number", "minimum": 0, "maximum": 1000000 },
+                                    "cacheRead": { "type": "number", "minimum": 0, "maximum": 1000000 },
+                                    "cacheWrite": { "type": "number", "minimum": 0, "maximum": 1000000 },
+                                    "output": { "type": "number", "minimum": 0, "maximum": 1000000 },
+                                    "reasoning": { "type": "number", "minimum": 0, "maximum": 1000000 }
+                                }
+                            }
+                        }
+                    }
+                },
                 "mode": {
                     "type": "string",
                     "enum": ["range", "message"],

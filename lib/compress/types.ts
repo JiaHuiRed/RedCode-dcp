@@ -15,6 +15,7 @@ export interface CompressRangeEntry {
     startId: string
     endId: string
     summary: string
+    condensedSummaries?: Record<string, string>
 }
 
 export interface CompressRangeToolArgs {
@@ -96,6 +97,7 @@ export interface AppliedCompressionResult {
 }
 
 export interface CompressionStateInput {
+    protectedContentKnown?: boolean
     topic: string
     batchTopic: string
     startId: string

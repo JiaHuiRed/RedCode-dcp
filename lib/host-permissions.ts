@@ -99,3 +99,19 @@ export const hasExplicitToolPermission = (
 ): boolean => {
     return permissionConfig ? Object.prototype.hasOwnProperty.call(permissionConfig, tool) : false
 }
+
+export const hasMatchingToolPermission = (permissionConfig: PermissionConfig, tool: string): boolean =>
+    !!permissionConfig && Object.keys(permissionConfig).some((name) => wildcardMatch(tool, name))
+
+export function resolveEffectiveToolPermission(
+    name: string,
+    basePermission: PermissionAction,
+    hostPermissions: HostPermissionSnapshot,
+    agentName?: string,
+): PermissionAction {
+    if (basePermission === "deny") return "deny"
+    const match = findLastMatchingRule(getPermissionRules([
+        hostPermissions.global, agentName ? hostPermissions.agents[agentName] : undefined,
+    ]), (rule) => wildcardMatch(name, rule.permission) && rule.pattern === "*")
+    return match?.action ?? basePermission
+}

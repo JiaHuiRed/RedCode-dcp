@@ -135,6 +135,7 @@ export function applyCompressionState(
         createdAt,
         summary,
         workingState: input.workingState,
+        protectedContentKnown: input.protectedContentKnown,
     }
 
     messagesState.blocksById.set(blockId, block)

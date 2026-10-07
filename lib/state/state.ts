@@ -13,6 +13,7 @@ import {
     collectTurnNudgeAnchors,
 } from "./utils"
 import { getLastUserMessage } from "../messages/query"
+import { createEconomicsState, loadEconomicsState } from "../compression-economics"
 
 export const checkSession = async (
     client: any,
@@ -102,6 +103,7 @@ export function createSessionState(): SessionState {
         modelContextLimit: undefined,
         systemPromptTokens: undefined,
         warnedModelLimitKeys: new Set<string>(),
+        economics: createEconomicsState(),
     }
 }
 
@@ -139,6 +141,7 @@ export function resetSessionState(state: SessionState): void {
     state.modelContextLimit = undefined
     state.systemPromptTokens = undefined
     state.warnedModelLimitKeys = new Set<string>()
+    state.economics = createEconomicsState()
 }
 
 export async function ensureSessionInitialized(
@@ -179,6 +182,7 @@ export async function ensureSessionInitialized(
 
     state.prune.tools = loadPruneMap(persisted.prune.tools)
     state.prune.messages = loadPruneMessagesState(persisted.prune.messages)
+    state.economics = loadEconomicsState(persisted.economics)
     state.nudges.recovering = persisted.nudges.recovering === true
     state.nudges.contextLimitAnchors = new Set<string>(persisted.nudges.contextLimitAnchors || [])
     state.nudges.turnNudgeAnchors = new Set<string>([

@@ -43,6 +43,34 @@ DCP supports two compression modes:
 
 In `range` mode, when a new compression overlaps an earlier one, the earlier summary is nested inside the new one so information is preserved through layers of compression rather than diluted away. In both modes, protected tool outputs (such as subagents and skills) and protected file patterns are kept in compression summaries, ensuring that the most important information is never lost. You can also enable `protectUserMessages` to preserve your messages verbatim during compression, though note that large prompts (e.g. copy-pasting log files in the prompt) will then never be compressed away.
 
+### RedCode: archived context and compression economics
+
+- Range entries can optionally supply `condensedSummaries: { "b1": "Shorter account of the old work." }` for old blocks selected by that range. Placeholder, boundary, and missing-block expansion use the shorter account. The old block and its source links remain archived; protected verbatim tails are retained automatically. Legacy blocks whose protection provenance cannot be verified fall back to their full summary. Omitting this field preserves the previous behavior.
+- `dcp_search` searches literal text in this session's original messages and archived summaries, including inactive blocks. `dcp_read` reads an `mNNNN` or `bN` reference with `offset`/`limit` and returns `nextOffset` for continuation. These tools do not reactivate blocks or rewrite the active conversation. They honor host/agent permissions and the existing subagent setting; arbitrary session IDs and filesystem paths are not accepted.
+- Retrieval returns at most 8 KiB UTF-8 and 2,048 estimated tokens, including JSON metadata, by default. Searches examine at most 1 MiB and return at most ten results; query length is at most 256 characters. Offsets use UTF-16 character indices and returned continuation offsets do not split surrogate pairs.
+- `/dcp stats` includes a bounded compression ledger. It separates estimated context reduction from the observed **whole generating request** (including reasoning output). Cost and assumed cached-reuse payback require explicit model rates; absent rates or usage remain `unknown`. All first-postfold miss/write premium is an assumption for the forecast, not proof that compression caused those misses. Actual incremental savings and subscription quota are not inferred. Emergency compression and existing nudges are unchanged.
+
+Bounds are validated under `compress.contextManagement`; `dcp.schema.json` documents their safe ceilings. For example:
+
+```jsonc
+{
+    "compress": {
+        "contextManagement": {
+            "maxCondensedSummaryChars": 8192,
+            "maxOutputBytes": 8192,
+            "maxOutputTokens": 2048,
+            "maxQueryChars": 256,
+            "maxResults": 10,
+            "maxScanBytes": 1048576,
+            "ledgerMaxEntries": 128,
+            "rates": {}
+        }
+    }
+}
+```
+
+Rates are keyed by the exact `providerID/modelID`; each entry requires a currency label and `input`, `cacheRead`, `cacheWrite`, `output`, and `reasoning` prices per million tokens. No provider prices are guessed. Build the plugin and restart the session to load the new tools.
+
 ### Deduplication
 
 Identifies repeated tool calls (same tool, same arguments) and keeps only the most recent output. Recalculated when the compress tool runs, so prompt cache is only impacted alongside compression.

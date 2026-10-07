@@ -1,4 +1,5 @@
 import type { CompressionTimingState } from "../compress/timing"
+import type { EconomicsState } from "../compression-economics"
 import { Message, Part } from "@opencode-ai/sdk/v2"
 
 export interface WithParts {
@@ -73,6 +74,7 @@ export interface CompressionBlock {
     deactivatedByBlockId?: number
     summary: string
     workingState?: WorkingState
+    protectedContentKnown?: boolean
 }
 
 export interface PruneMessagesState {
@@ -117,6 +119,7 @@ export interface Nudges {
 }
 
 export interface SessionState {
+    economics?: EconomicsState
     sessionId: string | null
     isSubAgent: boolean
     manualMode: false | "active" | "compress-pending"

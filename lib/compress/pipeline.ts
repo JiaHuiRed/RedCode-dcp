@@ -10,6 +10,8 @@ import type { ToolContext } from "./types"
 import { buildSearchContext, fetchSessionMessages } from "./search"
 import type { SearchContext } from "./types"
 import { applyPendingCompressionDurations } from "./timing"
+import { recordEconomics } from "../compression-economics"
+import { resolveContextConfig } from "../context-config"
 
 interface RunContext {
     ask(input: {
@@ -138,6 +140,14 @@ export async function finalizeSession(
         completed.reduce((sum, block) => sum + block.compressedTokens, 0) +
         consumed.reduce((sum, block) => sum + (block?.summaryTokens ?? 0), 0)
     const summaryTokensEstimated = completed.reduce((sum, block) => sum + block.summaryTokens, 0)
+    recordEconomics(ctx.state, {
+        runId: entries[0]!.runId,
+        messageId: completed[0]!.compressMessageId,
+        blockIds: completed.map((block) => block.blockId),
+        inputTokensEstimated,
+        summaryTokensEstimated,
+    }, resolveContextConfig(ctx.config.compress?.contextManagement))
+    await saveSessionState(ctx.state, ctx.logger)
     toolCtx.metadata({
         metadata: {
             dcpCompression: {
